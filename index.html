@@ -1,0 +1,2191 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulateur de Régulation PID CVC — Dexforma</title>
+
+    <!-- Polices techniques Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        dexBg: '#0B1120',
+                        dexCard: '#111827',
+                        dexSurface: '#1E293B',
+                        dexBorder: '#334155',
+                        dexCyan: '#38BDF8',
+                        dexOrange: '#EA580C',
+                        dexEmerald: '#10B981',
+                        dexRed: '#EF4444',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #0B1120;
+            color: #F8FAFC;
+            background-image:
+                radial-gradient(circle at 12% 8%, rgba(56, 189, 248, 0.06) 0%, transparent 38%),
+                radial-gradient(circle at 88% 92%, rgba(234, 88, 12, 0.06) 0%, transparent 38%);
+        }
+
+        /* Animations industrielles */
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+        .animate-pulse-fast {
+            animation: pulseGlow 1s ease-in-out infinite;
+        }
+
+        @keyframes flowDash {
+            to { stroke-dashoffset: -24; }
+        }
+        .pipe-flow-active {
+            stroke-dasharray: 6 6;
+            animation: flowDash 0.85s linear infinite;
+        }
+
+        @keyframes spinImpeller {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .impeller-spin {
+            transform-origin: center;
+            animation: spinImpeller var(--spin-dur, 2s) linear infinite;
+        }
+
+        /* Curseurs industriels personnalisés */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+        input[type="range"]:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 6px;
+            border-radius: 999px;
+            background: #1E293B;
+            border: 1px solid #334155;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #38BDF8;
+            border: 2px solid #0B1120;
+            margin-top: -7px;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+            transition: transform 0.12s ease;
+        }
+        input[type="range"]:not(:disabled)::-webkit-slider-thumb:hover {
+            transform: scale(1.12);
+        }
+        input[type="range"].range-orange::-webkit-slider-thumb {
+            background: #EA580C;
+            box-shadow: 0 0 10px rgba(234, 88, 12, 0.65);
+        }
+        input[type="range"].range-emerald::-webkit-slider-thumb {
+            background: #10B981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.65);
+        }
+
+        /* Scrollbar fine */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0B1120; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        /* Styles impression PDF */
+        @media print {
+            body { background: #FFFFFF !important; color: #0F172A !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-dexCyan selection:text-dexBg">
+
+    <!-- Conteneur de notifications Toast (zéro alert()) -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none no-print"></div>
+
+    <!-- ===================================================================== -->
+    <!-- 1. HEADER & SÉLECTEUR DU SYSTÈME / BOUCLE CVC                         -->
+    <!-- ===================================================================== -->
+    <header class="bg-dexCard/95 backdrop-blur-md border-b border-dexBorder shadow-xl no-print">
+        <div class="max-w-[1560px] mx-auto px-4 sm:px-6 py-3.5 space-y-3.5">
+
+            <!-- Ligne 1 : Titre Dexforma, État Temps Réel & Actions Utilitaires -->
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <div class="px-3 py-1.5 rounded-xl bg-gradient-to-br from-dexOrange to-amber-600 text-white font-extrabold text-xs tracking-widest uppercase shadow-lg shrink-0">
+                        DEXFORMA
+                    </div>
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h1 class="text-base sm:text-lg md:text-xl font-extrabold text-white tracking-tight">
+                                Simulateur de Régulation PID CVC — Dexforma
+                            </h1>
+                            <span id="header-run-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                ● SIMULATION ACTIVE
+                            </span>
+                        </div>
+                        <p class="text-xs text-slate-400">
+                            Banc d'essai d'automaticien CVC / GTB • Régulation en boucle fermée, analyse transitoire &amp; diagnostic terrain
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Boutons rapides : Mémo Terrain + Export Rapport -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <div class="px-3 py-1.5 rounded-xl bg-dexBg border border-dexBorder flex items-center gap-2 text-xs font-mono">
+                        <span class="text-slate-400">Chrono :</span>
+                        <strong id="sim-timer-display" class="text-dexCyan font-extrabold">00:00 s</strong>
+                    </div>
+
+                    <button type="button" onclick="toggleMemoDrawer()" class="px-3 py-2 rounded-xl bg-dexSurface hover:bg-slate-700 border border-dexBorder text-dexCyan text-xs font-bold flex items-center gap-1.5 transition cursor-pointer">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                        <span>Mémo Terrain PID</span>
+                    </button>
+
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="exportTextReport()" class="px-3 py-2 rounded-xl bg-dexSurface hover:bg-slate-700 border border-dexBorder text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer" title="Télécharger le rapport texte (.txt)">
+                            <svg class="w-4 h-4 text-dexEmerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            <span>Rapport .TXT</span>
+                        </button>
+                        <button type="button" onclick="printPdfReport()" class="px-3.5 py-2 rounded-xl bg-dexOrange hover:bg-orange-500 text-white text-xs font-extrabold shadow-lg flex items-center gap-1.5 transition cursor-pointer">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
+                            <span>Export Rapport / PDF</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ligne 2 : Sélecteur de Boucle CVC + Profil d'Exploitation + Boutons de Contrôle -->
+            <div class="pt-3 border-t border-dexBorder/80 grid grid-cols-1 xl:grid-cols-12 gap-3 items-center">
+
+                <!-- Sélecteur de la boucle CVC (5 col) -->
+                <div class="xl:col-span-5 flex flex-col sm:flex-row sm:items-center gap-2">
+                    <label for="loop-selector" class="text-xs font-bold text-slate-300 shrink-0 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-dexCyan"></span>
+                        <span>Boucle CVC :</span>
+                    </label>
+                    <select id="loop-selector" onchange="selectHvacLoop(this.value)" class="w-full px-3 py-2 rounded-xl bg-dexBg border border-dexBorder text-xs sm:text-sm font-bold text-white focus:outline-none focus:border-dexCyan cursor-pointer">
+                        <option value="cta_soufflage">1. Température de soufflage CTA (batterie eau chaude)</option>
+                        <option value="zone_ambiance">2. Température ambiante zone (vanne 2/3 voies)</option>
+                        <option value="pression_diff">3. Pression différentielle réseau (variateur pompe)</option>
+                    </select>
+                </div>
+
+                <!-- Sélecteur Profil / Mode d'essai (4 col) -->
+                <div class="xl:col-span-4 flex flex-wrap items-center gap-1.5">
+                    <span class="text-xs font-bold text-slate-400 mr-1">Profil :</span>
+                    <button type="button" id="profile-normal" onclick="setOperatingProfile('normal')" class="px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer bg-dexCyan/15 border-dexCyan text-dexCyan">
+                        Régime Normal
+                    </button>
+                    <button type="button" id="profile-shock" onclick="setOperatingProfile('shock')" class="px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer bg-dexSurface border-dexBorder text-slate-300 hover:text-white">
+                        Choc Thermique
+                    </button>
+                    <button type="button" id="profile-step" onclick="setOperatingProfile('step')" class="px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer bg-dexSurface border-dexBorder text-slate-300 hover:text-white">
+                        Test Pas de Consigne
+                    </button>
+                </div>
+
+                <!-- Commandes Simulation : Pause, Réinitialiser, Perturbation, Vitesse (3 col) -->
+                <div class="xl:col-span-3 flex flex-wrap items-center justify-start xl:justify-end gap-1.5">
+                    <button type="button" id="btn-pause-resume" onclick="togglePause()" class="px-3 py-1.5 rounded-xl bg-dexSurface hover:bg-slate-700 border border-dexBorder text-white text-xs font-bold transition cursor-pointer">
+                        ⏸ Pause
+                    </button>
+                    <button type="button" onclick="resetSimulation()" class="px-3 py-1.5 rounded-xl bg-dexSurface hover:bg-slate-700 border border-dexBorder text-slate-200 text-xs font-bold transition cursor-pointer">
+                        ↺ Réinitialiser
+                    </button>
+                    <button type="button" onclick="injectDisturbance()" class="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 text-xs font-extrabold transition cursor-pointer">
+                        ⚡ Perturbation
+                    </button>
+                    <div class="flex items-center bg-dexBg border border-dexBorder rounded-xl p-0.5">
+                        <button type="button" id="spd-1" onclick="setSimMultiplier(1)" class="px-2 py-1 rounded-lg text-[10px] font-mono font-bold bg-dexCyan text-dexBg cursor-pointer">1x</button>
+                        <button type="button" id="spd-2" onclick="setSimMultiplier(2)" class="px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-slate-400 hover:text-white cursor-pointer">2x</button>
+                        <button type="button" id="spd-5" onclick="setSimMultiplier(5)" class="px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-slate-400 hover:text-white cursor-pointer">5x</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ===================================================================== -->
+    <!-- NAVIGATION PRINCIPALE PAR ONGLETS                                     -->
+    <!-- ===================================================================== -->
+    <nav class="bg-dexSurface/60 border-b border-dexBorder px-4 sm:px-6 py-2.5 no-print">
+        <div class="max-w-[1560px] mx-auto flex items-center justify-between gap-3 overflow-x-auto">
+            <div class="flex items-center gap-2">
+                <button type="button" id="tab-bench" onclick="switchView('bench')" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-dexCyan text-dexBg shadow-md shrink-0 transition cursor-pointer">
+                    1. Banc d'Essai PID &amp; Courbes Temps Réel
+                </button>
+                <button type="button" id="tab-cases" onclick="switchView('cases')" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-300 hover:bg-dexSurface shrink-0 transition flex items-center gap-2 cursor-pointer">
+                    <span>2. Module 10 Cas Pratiques Terrain</span>
+                    <span id="cases-score-pill" class="px-2 py-0.5 rounded-full text-[11px] font-mono font-extrabold bg-dexOrange/20 text-dexOrange border border-dexOrange/40">0 / 10</span>
+                </button>
+            </div>
+
+            <!-- Indicateur diagnostic permanent -->
+            <div class="hidden md:flex items-center gap-2 shrink-0">
+                <span class="text-[11px] font-bold uppercase text-slate-400">État boucle :</span>
+                <span id="nav-diag-badge" class="px-3 py-1 rounded-full text-xs font-mono font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    ● STABLE &amp; PRÉCIS
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ===================================================================== -->
+    <!-- ENCART MÉMO TERRAIN PID (Dépliable à tout moment)                     -->
+    <!-- ===================================================================== -->
+    <section id="memo-drawer" class="hidden bg-dexCard border-b-2 border-dexCyan/50 shadow-2xl no-print">
+        <div class="max-w-[1560px] mx-auto px-4 sm:px-6 py-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="px-2 py-0.5 rounded bg-dexCyan/20 text-dexCyan font-mono font-bold text-xs">MÉMO TERRAIN</span>
+                    <h2 class="text-sm sm:text-base font-extrabold text-white">Synthèse Pratique du Régulateur PID en Génie Climatique (CVC)</h2>
+                </div>
+                <button type="button" onclick="toggleMemoDrawer()" class="px-2.5 py-1 rounded-lg bg-dexSurface hover:bg-slate-700 text-xs font-bold text-slate-300 cursor-pointer">
+                    Fermer ✕
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <!-- P -->
+                <div class="p-3.5 rounded-xl bg-dexBg border border-dexBorder space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <strong class="text-dexCyan font-extrabold text-sm">Action Proportionnelle (Kp / XP)</strong>
+                        <span class="font-mono text-[11px] text-slate-400">XP (%) = 100 / Kp</span>
+                    </div>
+                    <p class="text-slate-300 leading-relaxed">
+                        <strong>Rôle :</strong> Réagit instantanément et proportionnellement à l'écart <code class="text-dexCyan">e = W - X</code>. Plus Kp est élevé (ou XP étroite), plus la vanne ouvre vite.
+                    </p>
+                    <p class="text-amber-300"><strong>Si Kp trop fort :</strong> Pompage permanent (oscillations rapides de la vanne). <strong>Si Kp trop faible :</strong> Réponse molle et grand écart.</p>
+                </div>
+
+                <!-- I -->
+                <div class="p-3.5 rounded-xl bg-dexBg border border-dexBorder space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <strong class="text-dexEmerald font-extrabold text-sm">Action Intégrale (Ti / Ki)</strong>
+                        <span class="font-mono text-[11px] text-slate-400">Ki = Kp / Ti</span>
+                    </div>
+                    <p class="text-slate-300 leading-relaxed">
+                        <strong>Rôle :</strong> Cumule l'écart dans le temps pour <strong>annuler l'erreur statique</strong> et ramener exactement la mesure sur la consigne.
+                    </p>
+                    <p class="text-amber-300"><strong>Si Ti trop court (Ki fort) :</strong> Dépassement important (overshoot) et instabilité lente. <strong>Si Ti trop long :</strong> Retour très lent à la consigne.</p>
+                </div>
+
+                <!-- D -->
+                <div class="p-3.5 rounded-xl bg-dexBg border border-dexBorder space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <strong class="text-dexOrange font-extrabold text-sm">Action Dérivée (Td / Kd)</strong>
+                        <span class="font-mono text-[11px] text-slate-400">Kd = Kp × Td</span>
+                    </div>
+                    <p class="text-slate-300 leading-relaxed">
+                        <strong>Rôle :</strong> Anticipe la vitesse de variation de la mesure (effet frein). Utile sur les processus à forte inertie thermique (ambiance).
+                    </p>
+                    <p class="text-red-300"><strong>Piège terrain :</strong> Amplifie fortement le bruit de mesure (sondes de pression, débit). À laisser à <strong>0 s (mode PI)</strong> sur les boucles rapides/bruitées !</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- CONTENU PRINCIPAL                                                     -->
+    <!-- ===================================================================== -->
+    <main class="flex-1 max-w-[1560px] w-full mx-auto px-4 sm:px-6 py-5">
+
+        <!-- ================================================================= -->
+        <!-- VUE 1 : BANC D'ESSAI PID (SYNOPTIQUE + RÉGLAGES + COURBE)         -->
+        <!-- ================================================================= -->
+        <section id="view-bench" class="space-y-5">
+
+            <!-- 2. SCHÉMA SYNOPTIQUE DE LA BOUCLE DE RÉGULATION & ACTIONNEUR -->
+            <div class="bg-dexCard border border-dexBorder rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-dexBorder pb-2.5">
+                    <div>
+                        <span class="text-[11px] font-mono font-bold uppercase tracking-wider text-dexCyan">
+                            SCHÉMA SYNOPTIQUE TEMPS RÉEL — BOUCLE FERMÉE CVC
+                        </span>
+                        <h2 id="loop-title-display" class="text-sm sm:text-base font-extrabold text-white">
+                            Température de soufflage CTA (batterie eau chaude)
+                        </h2>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                        <span id="disturbance-active-badge" class="hidden px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500 text-amber-300 font-mono font-bold animate-pulse-fast">
+                            ⚡ PERTURBATION ACTIVE
+                        </span>
+                        <span id="antiwindup-badge" class="px-2.5 py-1 rounded-lg bg-dexSurface border border-dexBorder text-slate-300 font-mono text-[11px] font-bold">
+                            Anti-Windup : ARMÉ
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Diagramme Synoptique Interactif (SVG Responsive) -->
+                <div class="w-full overflow-x-auto bg-dexBg border border-dexBorder rounded-xl p-2 sm:p-3">
+                    <svg viewBox="0 0 1120 235" class="w-full min-w-[820px] h-auto select-none">
+                        <defs>
+                            <pattern id="pidGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1E293B" stroke-width="0.6" />
+                            </pattern>
+                            <marker id="arrowCyan" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                                <path d="M0,0 L8,4 L0,8 Z" fill="#38BDF8" />
+                            </marker>
+                            <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                                <path d="M0,0 L8,4 L0,8 Z" fill="#EA580C" />
+                            </marker>
+                            <marker id="arrowEmerald" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                                <path d="M0,0 L8,4 L0,8 Z" fill="#10B981" />
+                            </marker>
+                        </defs>
+
+                        <rect width="1120" height="235" fill="url(#pidGrid)" rx="10" />
+
+                        <!-- BLOC 1 : CONSIGNE (W) -->
+                        <g transform="translate(16, 36)">
+                            <rect width="155" height="96" rx="10" fill="#111827" stroke="#38BDF8" stroke-width="2" />
+                            <text x="77" y="21" text-anchor="middle" fill="#38BDF8" font-family="JetBrains Mono" font-weight="700" font-size="10">CONSIGNE (W)</text>
+                            <text id="syn-w-val" x="77" y="54" text-anchor="middle" fill="#F8FAFC" font-family="JetBrains Mono" font-weight="800" font-size="20">22.0 °C</text>
+                            <text id="syn-profile-txt" x="77" y="76" text-anchor="middle" fill="#94A3B8" font-family="Inter" font-size="10">Régime Normal</text>
+                        </g>
+
+                        <!-- Flèche W -> Comparateur -->
+                        <line x1="171" y1="84" x2="218" y2="84" stroke="#38BDF8" stroke-width="2.5" marker-end="url(#arrowCyan)" />
+                        <text x="193" y="75" fill="#38BDF8" font-family="JetBrains Mono" font-weight="800" font-size="12">+</text>
+
+                        <!-- BLOC 2 : COMPARATEUR (e = W - X) -->
+                        <g transform="translate(248, 84)">
+                            <circle r="26" fill="#1E293B" stroke="#38BDF8" stroke-width="2.2" />
+                            <text x="0" y="-4" text-anchor="middle" fill="#94A3B8" font-family="JetBrains Mono" font-size="9">ÉCART e</text>
+                            <text id="syn-err-val" x="0" y="11" text-anchor="middle" fill="#F8FAFC" font-family="JetBrains Mono" font-weight="800" font-size="11">0.0</text>
+                        </g>
+
+                        <!-- Flèche Comparateur -> Régulateur PID -->
+                        <line x1="274" y1="84" x2="322" y2="84" stroke="#38BDF8" stroke-width="2.5" marker-end="url(#arrowCyan)" />
+
+                        <!-- BLOC 3 : RÉGULATEUR PID -->
+                        <g transform="translate(328, 22)">
+                            <rect width="235" height="124" rx="12" fill="#111827" stroke="#EA580C" stroke-width="2.2" />
+                            <text x="117" y="21" text-anchor="middle" fill="#EA580C" font-family="JetBrains Mono" font-weight="800" font-size="11">RÉGULATEUR PID</text>
+                            <text id="syn-pid-mode" x="117" y="38" text-anchor="middle" fill="#E2E8F0" font-family="JetBrains Mono" font-weight="700" font-size="10">Mode PI • Kp=4.0 | Ti=35s</text>
+
+                            <!-- Barres P / I / D internes -->
+                            <text id="syn-p-term" x="14" y="60" fill="#38BDF8" font-family="JetBrains Mono" font-size="10">P : +0.0 %</text>
+                            <text id="syn-i-term" x="14" y="77" fill="#10B981" font-family="JetBrains Mono" font-size="10">I : +38.0 %</text>
+                            <text id="syn-d-term" x="14" y="94" fill="#F59E0B" font-family="JetBrains Mono" font-size="10">D : +0.0 %</text>
+
+                            <rect x="128" y="48" width="94" height="54" rx="8" fill="#0B1120" stroke="#334155" />
+                            <text x="175" y="65" text-anchor="middle" fill="#94A3B8" font-family="JetBrains Mono" font-size="9">SORTIE Y</text>
+                            <text id="syn-y-val" x="175" y="89" text-anchor="middle" fill="#EA580C" font-family="JetBrains Mono" font-weight="800" font-size="18">38.0 %</text>
+
+                            <text id="syn-sat-warning" x="117" y="116" text-anchor="middle" fill="#64748B" font-family="JetBrains Mono" font-weight="700" font-size="9.5">Plage de modulation normale (0–100%)</text>
+                        </g>
+
+                        <!-- Flèche PID -> Actionneur -->
+                        <line x1="563" y1="84" x2="612" y2="84" stroke="#EA580C" stroke-width="2.5" class="pipe-flow-active" marker-end="url(#arrowOrange)" />
+                        <text x="587" y="74" text-anchor="middle" fill="#EA580C" font-family="JetBrains Mono" font-weight="700" font-size="9.5">0–10V</text>
+
+                        <!-- BLOC 4 : ACTIONNEUR (VANNE MOTORISÉE / VARIATEUR POMPE) -->
+                        <g transform="translate(618, 22)">
+                            <rect id="syn-act-box" width="215" height="124" rx="12" fill="#111827" stroke="#334155" stroke-width="2" />
+                            <text id="syn-act-title" x="107" y="21" text-anchor="middle" fill="#F8FAFC" font-family="JetBrains Mono" font-weight="800" font-size="10.5">VANNE 3 VOIES CHAUDE</text>
+
+                            <!-- Symbole Vanne CVC Animé -->
+                            <g id="svg-valve-symbol" transform="translate(46, 68)">
+                                <!-- Corps de vanne papillon/soupape -->
+                                <polygon points="-24,-14 0,0 -24,14" fill="#1E293B" stroke="#38BDF8" stroke-width="2" />
+                                <polygon points="24,-14 0,0 24,14" fill="#1E293B" stroke="#38BDF8" stroke-width="2" />
+                                <!-- Tige & Servomoteur -->
+                                <line x1="0" y1="0" x2="0" y2="-22" stroke="#94A3B8" stroke-width="2.5" />
+                                <rect x="-14" y="-36" width="28" height="15" rx="3" fill="#EA580C" />
+                                <!-- Indicateur d'ouverture dynamique -->
+                                <rect id="svg-valve-plug" x="-5" y="-12" width="10" height="12" fill="#10B981" />
+                            </g>
+
+                            <!-- Symbole Variateur / Pompe Animé (affiché en mode pression) -->
+                            <g id="svg-pump-symbol" transform="translate(46, 68)" class="hidden">
+                                <circle cx="0" cy="0" r="22" fill="#1E293B" stroke="#38BDF8" stroke-width="2.2" />
+                                <g id="svg-pump-impeller" class="impeller-spin">
+                                    <line x1="-14" y1="0" x2="14" y2="0" stroke="#EA580C" stroke-width="3" />
+                                    <line x1="0" y1="-14" x2="0" y2="14" stroke="#EA580C" stroke-width="3" />
+                                    <circle cx="0" cy="0" r="4" fill="#F8FAFC" />
+                                </g>
+                            </g>
+
+                            <text id="syn-act-pct" x="142" y="64" text-anchor="middle" fill="#F8FAFC" font-family="JetBrains Mono" font-weight="800" font-size="19">38.0 %</text>
+                            <text id="syn-act-dir" x="142" y="83" text-anchor="middle" fill="#10B981" font-family="JetBrains Mono" font-weight="700" font-size="10">● Stabilisé</text>
+                            <text id="syn-act-limit" x="107" y="114" text-anchor="middle" fill="#94A3B8" font-family="JetBrains Mono" font-size="9.5">Course actionneur libre</text>
+                        </g>
+
+                        <!-- Flèche Actionneur -> Processus CVC -->
+                        <line x1="833" y1="84" x2="882" y2="84" stroke="#10B981" stroke-width="2.5" class="pipe-flow-active" marker-end="url(#arrowEmerald)" />
+
+                        <!-- BLOC 5 : PROCESSUS / RÉSEAU CVC & SONDE (X) -->
+                        <g transform="translate(888, 22)">
+                            <rect width="215" height="124" rx="12" fill="#111827" stroke="#10B981" stroke-width="2.2" />
+                            <text id="syn-proc-title" x="107" y="21" text-anchor="middle" fill="#10B981" font-family="JetBrains Mono" font-weight="800" font-size="10.5">BATTERIE &amp; SONDE (X)</text>
+                            <text id="syn-x-val" x="107" y="58" text-anchor="middle" fill="#F8FAFC" font-family="JetBrains Mono" font-weight="800" font-size="22">22.0 °C</text>
+                            <text id="syn-proc-dyn" x="107" y="80" text-anchor="middle" fill="#94A3B8" font-family="JetBrains Mono" font-size="9.5">Inertie τ=18s • Retard θ=4s</text>
+                            <text id="syn-dist-info" x="107" y="102" text-anchor="middle" fill="#38BDF8" font-family="JetBrains Mono" font-size="9.5">Charge ext : Nominale</text>
+                        </g>
+
+                        <!-- BOUCLE DE RETOUR (CAPTEUR X -> COMPARATEUR) -->
+                        <polyline points="995,146 995,198 248,198 248,116" fill="none" stroke="#10B981" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#arrowEmerald)" />
+                        <rect x="525" y="185" width="210" height="24" rx="6" fill="#0B1120" stroke="#10B981" stroke-width="1.2" />
+                        <text x="630" y="201" text-anchor="middle" fill="#10B981" font-family="JetBrains Mono" font-weight="700" font-size="10">
+                            Contre-réaction Sonde Mesure (X)
+                        </text>
+                        <text x="234" y="125" fill="#EF4444" font-family="JetBrains Mono" font-weight="800" font-size="14">−</text>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- GRILLE PRINCIPALE : RÉGLAGES PID (4 COL) + GRAPHIQUE TEMPS RÉEL (8 COL) -->
+            <div class="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+
+                <!-- 3. PANNEAU DE RÉGLAGES PID & AIDE AU DIAGNOSTIC (4 colonnes) -->
+                <div class="xl:col-span-4 bg-dexCard border border-dexBorder rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+
+                    <div class="flex items-center justify-between border-b border-dexBorder pb-2.5">
+                        <div>
+                            <span class="text-[11px] font-mono font-bold uppercase text-dexOrange">PARAMÉTRAGE RÉGULATEUR</span>
+                            <h3 class="text-sm sm:text-base font-extrabold text-white">Actions P, I, D &amp; Consigne</h3>
+                        </div>
+                        <button type="button" onclick="applyFactoryTuning()" class="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold transition cursor-pointer">
+                            ✓ Réglage d'usine
+                        </button>
+                    </div>
+
+                    <!-- Formule mathématique claire -->
+                    <div class="p-2.5 rounded-xl bg-dexBg border border-dexBorder text-[11px] font-mono text-slate-300 flex flex-col gap-1">
+                        <span class="text-slate-400 text-[10px] uppercase font-bold">Algorithme PID Parallèle Standard (ISA) :</span>
+                        <span class="text-dexCyan font-bold">Y = Kp × [ e + (1/Ti)∫e·dt + Td·(de/dt) ]</span>
+                    </div>
+
+                    <!-- Sélecteur Structure Régulateur : P / PI / PID / Manuel -->
+                    <div class="grid grid-cols-4 gap-1.5">
+                        <button type="button" id="ctrl-mode-P" onclick="setControllerMode('P')" class="py-2 px-1 rounded-xl border text-xs font-extrabold transition cursor-pointer bg-dexSurface border-dexBorder text-slate-300 hover:text-white">
+                            P seul
+                        </button>
+                        <button type="button" id="ctrl-mode-PI" onclick="setControllerMode('PI')" class="py-2 px-1 rounded-xl border text-xs font-extrabold transition cursor-pointer bg-dexCyan/15 border-dexCyan text-dexCyan">
+                            PI (CVC)
+                        </button>
+                        <button type="button" id="ctrl-mode-PID" onclick="setControllerMode('PID')" class="py-2 px-1 rounded-xl border text-xs font-extrabold transition cursor-pointer bg-dexSurface border-dexBorder text-slate-300 hover:text-white">
+                            PID
+                        </button>
+                        <button type="button" id="ctrl-mode-MAN" onclick="setControllerMode('MAN')" class="py-2 px-1 rounded-xl border text-xs font-extrabold transition cursor-pointer bg-dexSurface border-dexBorder text-amber-300 hover:text-amber-200">
+                            Manuel
+                        </button>
+                    </div>
+
+                    <!-- Consigne W + Forçage Manuel Y -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div class="p-3 rounded-xl bg-dexBg border border-dexBorder space-y-1.5">
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="font-bold text-dexCyan">Consigne (W)</span>
+                                <span id="unit-w-label" class="font-mono text-slate-400">°C</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <button type="button" onclick="nudgeSetpoint(-1)" class="w-8 h-8 rounded-lg bg-dexSurface hover:bg-slate-700 text-white font-bold cursor-pointer">-</button>
+                                <input type="number" id="input-setpoint" step="0.5" value="22.0" onchange="updateSetpointFromInput(this.value)" class="w-full text-center py-1 rounded-lg bg-dexCard border border-dexBorder font-mono font-extrabold text-sm text-white focus:outline-none focus:border-dexCyan">
+                                <button type="button" onclick="nudgeSetpoint(1)" class="w-8 h-8 rounded-lg bg-dexSurface hover:bg-slate-700 text-white font-bold cursor-pointer">+</button>
+                            </div>
+                        </div>
+
+                        <div id="manual-y-box" class="p-3 rounded-xl bg-dexBg border border-dexBorder space-y-1.5 opacity-60">
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="font-bold text-amber-400">Forçage Y (%)</span>
+                                <span id="manual-y-val" class="font-mono font-bold text-white">40%</span>
+                            </div>
+                            <input type="range" id="slider-manual-y" min="0" max="100" step="1" value="40" disabled oninput="updateManualY(this.value)" class="w-full range-orange">
+                            <div class="text-[10px] text-slate-400 text-right">Actif en mode Manuel</div>
+                        </div>
+                    </div>
+
+                    <!-- Curseurs PID précis -->
+                    <div class="space-y-3.5 pt-1">
+                        <!-- Gain Proportionnel Kp / XP -->
+                        <div class="p-3 rounded-xl bg-dexBg border border-dexBorder space-y-2">
+                            <div class="flex flex-wrap items-center justify-between gap-1 text-xs">
+                                <label for="slider-kp" class="font-extrabold text-dexCyan">Gain Proportionnel (Kp)</label>
+                                <span id="xp-equivalent" class="font-mono text-[11px] px-2 py-0.5 rounded bg-dexCyan/10 text-dexCyan border border-dexCyan/30">
+                                    XP = 25.0 %
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <input type="range" id="slider-kp" min="0.2" max="25" step="0.1" value="4.0" oninput="syncPidParam('kp', this.value)" class="flex-1">
+                                <input type="number" id="num-kp" min="0.1" max="50" step="0.1" value="4.0" onchange="syncPidParam('kp', this.value)" class="w-20 px-2 py-1 rounded-lg bg-dexCard border border-dexBorder font-mono font-bold text-xs text-right text-white">
+                            </div>
+                        </div>
+
+                        <!-- Action Intégrale Ti -->
+                        <div id="box-ti" class="p-3 rounded-xl bg-dexBg border border-dexBorder space-y-2 transition-opacity">
+                            <div class="flex flex-wrap items-center justify-between gap-1 text-xs">
+                                <label for="slider-ti" class="font-extrabold text-dexEmerald">Temps d'Intégrale Ti (s)</label>
+                                <span id="ki-equivalent" class="font-mono text-[11px] text-slate-400">
+                                    Ki = 0.114 s⁻¹
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <input type="range" id="slider-ti" min="2" max="240" step="1" value="35" oninput="syncPidParam('ti', this.value)" class="flex-1 range-emerald">
+                                <input type="number" id="num-ti" min="1" max="600" step="1" value="35" onchange="syncPidParam('ti', this.value)" class="w-20 px-2 py-1 rounded-lg bg-dexCard border border-dexBorder font-mono font-bold text-xs text-right text-white">
+                            </div>
+                        </div>
+
+                        <!-- Action Dérivée Td -->
+                        <div id="box-td" class="p-3 rounded-xl bg-dexBg border border-dexBorder space-y-2 opacity-45 transition-opacity">
+                            <div class="flex flex-wrap items-center justify-between gap-1 text-xs">
+                                <label for="slider-td" class="font-extrabold text-dexOrange">Temps de Dérivée Td (s)</label>
+                                <span id="kd-equivalent" class="font-mono text-[11px] text-slate-400">
+                                    Kd = 0.0 s
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <input type="range" id="slider-td" min="0" max="40" step="0.5" value="0" disabled oninput="syncPidParam('td', this.value)" class="flex-1 range-orange">
+                                <input type="number" id="num-td" min="0" max="100" step="0.5" value="0" disabled onchange="syncPidParam('td', this.value)" class="w-20 px-2 py-1 rounded-lg bg-dexCard border border-dexBorder font-mono font-bold text-xs text-right text-white">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Raccourcis Pédagogiques de comportement -->
+                    <div class="pt-1 space-y-1.5">
+                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Tests rapides de comportement :</span>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" onclick="simulateOscillationPreset()" class="py-2 px-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-300 text-[11px] font-bold transition cursor-pointer">
+                                〰 Simuler Pompage (Kp fort)
+                            </button>
+                            <button type="button" onclick="simulateSlowPreset()" class="py-2 px-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] font-bold transition cursor-pointer">
+                                🐢 Réponse Lente (Ti long)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. GRAPHIQUE DYNAMIQUE TEMPS RÉEL & INDICATEURS DE PERFORMANCE (8 colonnes) -->
+                <div class="xl:col-span-8 space-y-4">
+
+                    <!-- Bandeau des 4 Indicateurs en Direct -->
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div class="bg-dexCard border border-dexBorder rounded-2xl p-3.5 shadow">
+                            <span class="text-[10px] font-bold uppercase text-slate-400">Erreur Statique |W − X|</span>
+                            <div class="mt-1 flex items-baseline justify-between">
+                                <strong id="metric-error" class="text-xl font-mono font-extrabold text-white">0.00 °C</strong>
+                                <span id="metric-error-sub" class="text-[11px] font-mono text-emerald-400">Précis</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-dexCard border border-dexBorder rounded-2xl p-3.5 shadow">
+                            <span class="text-[10px] font-bold uppercase text-slate-400">Dépassement Max (Overshoot)</span>
+                            <div class="mt-1 flex items-baseline justify-between">
+                                <strong id="metric-overshoot" class="text-xl font-mono font-extrabold text-dexCyan">0.0 %</strong>
+                                <span class="text-[11px] font-mono text-slate-400">Cible &lt; 10%</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-dexCard border border-dexBorder rounded-2xl p-3.5 shadow">
+                            <span class="text-[10px] font-bold uppercase text-slate-400">Temps de Réponse (±2%)</span>
+                            <div class="mt-1 flex items-baseline justify-between">
+                                <strong id="metric-settling" class="text-xl font-mono font-extrabold text-white">—</strong>
+                                <span id="metric-osc-count" class="text-[11px] font-mono text-slate-400">Osc: 0</span>
+                            </div>
+                        </div>
+
+                        <div class="bg-dexCard border border-dexBorder rounded-2xl p-3.5 shadow">
+                            <span class="text-[10px] font-bold uppercase text-slate-400">Diagnostic Automatique</span>
+                            <div class="mt-1.5">
+                                <span id="metric-diag-badge" class="inline-block px-2.5 py-1 rounded-lg text-xs font-mono font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                    Stable &amp; Précis
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Carte du Graphique Oscilloscope Temps Réel -->
+                    <div class="bg-dexCard border border-dexBorder rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <span class="text-[11px] font-mono font-bold uppercase text-dexCyan">ENREGISTREUR DE TENDANCES GTB</span>
+                                <h3 class="text-sm sm:text-base font-extrabold text-white">Évolution Temps Réel : Consigne (W), Mesure (X) &amp; Commande (Y)</h3>
+                            </div>
+
+                            <!-- Légende & Filtres d'affichage + Option Bruit Sonde -->
+                            <div class="flex flex-wrap items-center gap-3 text-xs">
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input type="checkbox" id="chk-show-w" checked class="accent-sky-400">
+                                    <span class="font-mono font-bold text-dexCyan">--- Consigne W</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input type="checkbox" id="chk-show-x" checked class="accent-emerald-400">
+                                    <span class="font-mono font-bold text-dexEmerald">― Mesure X</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                    <input type="checkbox" id="chk-show-y" checked class="accent-orange-500">
+                                    <span class="font-mono font-bold text-dexOrange">▬ Commande Y (%)</span>
+                                </label>
+                                <label class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-dexBg border border-dexBorder cursor-pointer select-none" title="Active/Amplifie le bruit réaliste du capteur terrain">
+                                    <input type="checkbox" id="chk-sensor-noise" checked onchange="toggleSensorNoise(this.checked)" class="accent-amber-400">
+                                    <span class="font-mono text-[11px] text-amber-300 font-bold">Bruit sonde</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Zone Canvas Haute Résolution -->
+                        <div class="relative w-full h-[360px] sm:h-[400px] bg-dexBg border border-dexBorder rounded-xl p-2">
+                            <canvas id="pid-trend-canvas" class="w-full h-full block cursor-crosshair"></canvas>
+                            <!-- Tooltip d'inspection au survol -->
+                            <div id="canvas-hover-tooltip" class="hidden pointer-events-none absolute top-3 left-14 px-3 py-2 rounded-xl bg-dexCard/95 border border-dexBorder shadow-xl font-mono text-xs space-y-0.5"></div>
+                        </div>
+
+                        <!-- Barre d'aide contextuelle dynamique -->
+                        <div id="live-advisor-box" class="p-3 rounded-xl bg-dexBg border border-dexBorder text-xs text-slate-300 flex items-start gap-2.5">
+                            <span class="text-dexCyan font-extrabold shrink-0">💡 Conseil Automaticien :</span>
+                            <span id="live-advisor-text">La boucle est équilibrée. Testez un "Test Pas de Consigne" ou cliquez sur "Perturbation" pour observer le rejet de charge.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================================================================= -->
+        <!-- VUE 2 : MODULE DE 10 CAS PRATIQUES TERRAIN (DIAGNOSTIC & PID)     -->
+        <!-- ================================================================= -->
+        <section id="view-cases" class="hidden space-y-5">
+            <div class="bg-dexCard border border-dexBorder rounded-2xl p-4 sm:p-6 shadow-xl space-y-5">
+
+                <!-- En-tête du module -->
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-4 border-b border-dexBorder">
+                    <div>
+                        <span class="text-[11px] font-mono font-bold uppercase tracking-wider text-dexOrange">
+                            ATELIER PRATIQUE DEXFORMA • MISE EN SERVICE &amp; DÉPANNAGE PID CVC
+                        </span>
+                        <h2 class="text-base sm:text-lg font-extrabold text-white">
+                            10 Scénarios Terrain : Diagnostic de Courbes, Pièges Capteurs &amp; Réglage PID
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">
+                            4 cas Diagnostic de comportement • 3 cas Perturbations &amp; Pièges terrain • 3 cas Bonnes pratiques de mise en service
+                        </p>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="px-4 py-2 rounded-xl bg-dexBg border border-dexBorder text-right">
+                            <span class="text-[10px] font-bold uppercase text-slate-400 block">Score Validation</span>
+                            <strong id="cases-score-big" class="text-lg font-mono font-extrabold text-emerald-400">0 / 10</strong>
+                        </div>
+                        <button type="button" onclick="printPdfReport()" class="px-4 py-2.5 rounded-xl bg-dexOrange hover:bg-orange-500 text-white text-xs font-extrabold shadow cursor-pointer">
+                            Exporter Résultats PDF
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sélecteur rapide des 10 cas -->
+                <div id="cases-nav-grid" class="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+                    <!-- Généré dynamiquement par JS -->
+                </div>
+
+                <!-- Espace de travail du cas pratique sélectionné -->
+                <div id="case-active-card" class="bg-dexBg border border-dexBorder rounded-2xl p-4 sm:p-6 space-y-4">
+                    <!-- Généré dynamiquement par JS -->
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ===================================================================== -->
+    <!-- VUE IMPRIMABLE RAPPORT D'INTERVENTION PID (Masquée à l'écran)         -->
+    <!-- ===================================================================== -->
+    <section id="print-report-section" class="hidden print-only p-8 bg-white text-slate-900 space-y-6">
+        <div class="border-b-2 border-slate-900 pb-4 flex justify-between items-start">
+            <div>
+                <div class="text-xs font-bold uppercase tracking-widest text-orange-600">DEXFORMA — INGÉNIERIE &amp; FORMATION CVC / GTB</div>
+                <h1 class="text-2xl font-extrabold text-slate-900 mt-1">RAPPORT DE RÉGLAGE PID &amp; MISE EN SERVICE CVC</h1>
+                <p class="text-sm text-slate-600">Fiche de relevé de boucle fermée, paramètres régulateur et évaluation terrain</p>
+            </div>
+            <div id="print-timestamp" class="text-right font-mono text-xs text-slate-700"></div>
+        </div>
+        <div id="print-content-body" class="space-y-5 text-sm"></div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- MOTEUR PHYSIQUE, RÉGULATEUR PID, GRAPHISME CANVAS & CAS PRATIQUES     -->
+    <!-- ===================================================================== -->
+    <script>
+        // =====================================================================
+        // 1. DÉFINITION DES 3 BOUCLES CVC RÉALISTES
+        // =====================================================================
+        const HVAC_LOOPS = {
+            cta_soufflage: {
+                id: 'cta_soufflage',
+                name: 'Température de soufflage CTA (batterie eau chaude)',
+                unit: '°C',
+                decimals: 1,
+                minW: 14,
+                maxW: 32,
+                stepW: 0.5,
+                defaultW: 22.0,
+                stepTestDelta: 3.0,
+                actuatorName: 'VANNE 3 VOIES BATTERIE CHAUDE',
+                actuatorType: 'valve',
+                processName: 'BATTERIE EAU CHAUDE & SONDE SOUFFLAGE',
+                // Paramètres physiques : premier ordre + retard pur + gain statique
+                ambientBase: 14.0,     // Température air mélangé avant batterie (°C)
+                processGain: 0.24,     // +24°C d'élévation max à 100% vanne (14 + 24 = 38°C max)
+                tau: 16.0,             // Constante de temps thermique batterie + sonde (s)
+                deadTime: 3.5,         // Retard pur transport gaine (s)
+                noiseAmp: 0.08,        // Bruit sonde Pt1000 léger (°C)
+                disturbanceMagnitude: -5.5, // Chute d'air neuf glacial (-5.5°C)
+                disturbanceLabel: 'Air neuf glacial (-5°C) / Grand débit',
+                factoryPid: { mode: 'PI', kp: 4.2, ti: 32, td: 0 }
+            },
+            zone_ambiance: {
+                id: 'zone_ambiance',
+                name: 'Température ambiante zone (vanne 2/3 voies)',
+                unit: '°C',
+                decimals: 1,
+                minW: 16,
+                maxW: 26,
+                stepW: 0.5,
+                defaultW: 21.0,
+                stepTestDelta: 2.0,
+                actuatorName: 'VANNE TERMINALE 2/3 VOIES ZONE',
+                actuatorType: 'valve',
+                processName: 'LOCAL TERTIAIRE & SONDE AMBIANCE',
+                ambientBase: 15.5,
+                processGain: 0.13,     // 15.5 + 13 = 28.5°C max
+                tau: 42.0,             // Forte inertie thermique du bâtiment (s simulées)
+                deadTime: 6.0,         // Retard diffusion pièce (s)
+                noiseAmp: 0.05,        // Sonde murale très stable
+                disturbanceMagnitude: 2.8, // Apports solaires / occupation soudaine (+2.8°C)
+                disturbanceLabel: 'Apports solaires & occupation (+25 pers.)',
+                factoryPid: { mode: 'PI', kp: 6.5, ti: 65, td: 0 }
+            },
+            pression_diff: {
+                id: 'pression_diff',
+                name: 'Pression différentielle réseau (variateur pompe)',
+                unit: 'bar',
+                decimals: 2,
+                minW: 0.40,
+                maxW: 2.50,
+                stepW: 0.10,
+                defaultW: 1.20,
+                stepTestDelta: 0.35,
+                actuatorName: 'VARIATEUR FRÉQUENCE POMPE (0–50 Hz)',
+                actuatorType: 'pump',
+                processName: 'RÉSEAU HYDRAULIQUE & CAPTEUR ΔP',
+                ambientBase: 0.15,     // Pression statique minimale (bar)
+                processGain: 0.022,    // 0.15 + 2.2 = 2.35 bar à 100% vitesse
+                tau: 4.5,              // Dynamique hydraulique rapide (s)
+                deadTime: 0.8,         // Quasi instantané
+                noiseAmp: 0.045,       // Turbulence hydraulique notable sur capteur ΔP
+                disturbanceMagnitude: -0.45, // Ouverture brutale d'une branche secondaire
+                disturbanceLabel: 'Ouverture brutale vanne branche secondaire',
+                factoryPid: { mode: 'PI', kp: 14.0, ti: 9, td: 0 }
+            }
+        };
+
+        // =====================================================================
+        // 2. ÉTAT GLOBAL DU SIMULATEUR PID
+        // =====================================================================
+        const simState = {
+            loopKey: 'cta_soufflage',
+            profile: 'normal',        // 'normal' | 'shock' | 'step'
+            paused: false,
+            speedMult: 1,
+            simTime: 0,
+            stepTimer: 0,
+            stepDirection: 1,
+
+            // Paramètres PID
+            ctrlMode: 'PI',           // 'P' | 'PI' | 'PID' | 'MAN'
+            setpoint: 22.0,
+            manualY: 40.0,
+            kp: 4.2,
+            ti: 32,
+            td: 0,
+
+            // États internes régulateur
+            integralTerm: 33.3,       // Initialisé à l'équilibre
+            filteredDeriv: 0,
+            prevMeasurement: 22.0,
+            pContrib: 0,
+            iContrib: 33.3,
+            dContrib: 0,
+            outputY: 33.3,            // Sortie régulateur 0..100%
+            actuatorPos: 33.3,        // Position réelle actionneur (avec vitesse de course)
+            prevActuatorPos: 33.3,
+            antiWindupActive: false,
+
+            // États processus physique
+            processTrueX: 22.0,
+            measuredX: 22.0,
+            sensorNoiseEnabled: true,
+            delayBuffer: [],          // File FIFO pour retard pur (dead time)
+            disturbancePulse: 0,      // Perturbation transitoire injectée
+            disturbanceDecayTimer: 0,
+
+            // Métriques transitoires
+            stepRefStart: 22.0,
+            stepRefTarget: 22.0,
+            stepStartTime: 0,
+            maxOvershootPct: 0,
+            settlingTimeSec: null,
+            signCrossings: 0,
+            lastErrSign: 0,
+            diagnosticLabel: 'Stable & Précis',
+            diagnosticLevel: 'ok',
+
+            // Historique graphique (max 240 points)
+            history: [],
+            eventsMarkers: [],
+            hoverIndex: null,
+
+            // Cas pratiques
+            activeTab: 'bench',
+            currentCaseIdx: 0,
+            caseAnswers: {}
+        };
+
+        // =====================================================================
+        // 3. BASE DES 10 CAS PRATIQUES TERRAIN (DIAGNOSTIC & RÉGLAGE PID)
+        // =====================================================================
+        const PID_PRACTICAL_CASES = [
+            // --- 4 CAS SUR LE DIAGNOSTIC DE COMPORTEMENT ---
+            {
+                id: 1,
+                category: 'Diagnostic de Comportement',
+                catStyle: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+                title: 'Cas #1 — Pompage rapide sur batterie eau chaude CTA',
+                situation: "Sur une Centrale de Traitement d'Air neuve, la vanne 3 voies de la batterie chaude oscille sans arrêt de 0 % à 100 % toutes les 30 secondes. La température de soufflage fait le yoyo entre 16 °C et 29 °C.",
+                curveObs: "Courbe X sinusoïdale entretenue autour de W ; courbe Y en créneaux 0 % ↔ 100 %.",
+                question: "Quelle est la cause première de ce phénomène de pompage et comment le corriger ?",
+                options: [
+                    "Le gain proportionnel Kp est beaucoup trop élevé (bande proportionnelle XP trop étroite) : il faut réduire Kp (augmenter XP) et vérifier le temps d'intégrale Ti",
+                    "Le temps d'intégrale Ti est trop long (300 s) : il faut le descendre à 2 secondes",
+                    "Il faut activer une action dérivée Td de 30 secondes sur la sonde"
+                ],
+                correct: 0,
+                explanation: "Un gain Kp excessif rend le régulateur hypersensible au moindre écart : il ouvre la vanne à fond, dépasse la consigne, puis ferme à fond en boucle. Diminuer Kp (élargir la bande proportionnelle XP = 100/Kp) amortit immédiatement les oscillations.",
+                benchPreset: { loopKey: 'cta_soufflage', ctrlMode: 'PI', kp: 20.0, ti: 12, td: 0, setpoint: 22.0 }
+            },
+            {
+                id: 2,
+                category: 'Diagnostic de Comportement',
+                catStyle: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+                title: 'Cas #2 — Erreur statique persistante en régulation de zone',
+                situation: "Dans un plateau de bureaux réglé avec un régulateur configuré en mode P seul (Kp = 4), la température ambiante reste parfaitement stable mais bloquée à 19,2 °C pour une consigne de 21,0 °C en hiver.",
+                curveObs: "Courbe X parfaitement plate à 19,2 °C ; écart constant e = +1,8 °C ; sortie Y figée à 36 %.",
+                question: "Pourquoi la mesure n'atteint-elle jamais la consigne de 21,0 °C ?",
+                options: [
+                    "En action Proportionnelle (P) pure, un écart non nul est indispensable pour maintenir la vanne ouverte (Y = Kp × e) : il faut activer l'action Intégrale (Ti)",
+                    "La sonde d'ambiance est hors service",
+                    "Il faut augmenter la dérivée Td à 15 secondes"
+                ],
+                correct: 0,
+                explanation: "En régulation P seule, si e = 0 alors Y = 0 % (vanne fermée). Pour maintenir la vanne ouverte à 36 % face aux déperditions hivernales, le régulateur a besoin d'un écart permanent (erreur statique). L'action Intégrale (mode PI) élimine cet écart résiduel.",
+                benchPreset: { loopKey: 'zone_ambiance', ctrlMode: 'P', kp: 4.0, ti: 60, td: 0, setpoint: 21.0 }
+            },
+            {
+                id: 3,
+                category: 'Diagnostic de Comportement',
+                catStyle: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+                title: 'Cas #3 — Dépassement important (+3,5 °C) lors d’une montée en consigne',
+                situation: "Lorsqu'on passe la consigne de soufflage de 19 °C à 23 °C, la température grimpe jusqu'à 26,5 °C avant de redescendre lentement et d'osciller deux fois avant de se stabiliser.",
+                curveObs: "Dépassement (overshoot) de +87 % par rapport au pas de consigne ; vanne maintenue à 100 % trop longtemps.",
+                question: "Quel paramètre PID est principalement responsable de ce fort dépassement ?",
+                options: [
+                    "Le temps d'intégrale Ti est trop court (action intégrale trop nerveuse qui cumule trop d'énergie pendant la montée) : il faut augmenter Ti",
+                    "Le gain Kp est nul",
+                    "La sonde de température est placée avant la batterie"
+                ],
+                correct: 0,
+                explanation: "Un temps d'intégrale Ti trop court fait grimper le terme intégral très rapidement tant que X < W. Lorsque X atteint enfin W, le terme I est encore énorme et continue de chauffer à plein régime. Augmenter Ti (ralentir l'intégrale) supprime ce dépassement.",
+                benchPreset: { loopKey: 'cta_soufflage', ctrlMode: 'PI', kp: 5.5, ti: 6, td: 0, setpoint: 23.0 }
+            },
+            {
+                id: 4,
+                category: 'Diagnostic de Comportement',
+                catStyle: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+                title: 'Cas #4 — Réaction anormalement lente après variation de consigne',
+                situation: "Après un abaissement ou un relèvement de consigne de 2 °C dans une zone, la température met plus de 25 minutes à rejoindre la nouvelle cible, sans aucune oscillation.",
+                curveObs: "Montée exponentielle très plate de X ; sortie Y progressant par petits pas très lents.",
+                question: "Comment accélérer le temps de réponse tout en gardant la stabilité ?",
+                options: [
+                    "Augmenter progressivement le gain proportionnel Kp et réduire le temps d'intégrale Ti (trop long)",
+                    "Basculer en mode Manuel à 50 %",
+                    "Diviser Kp par 4 et multiplier Ti par 3"
+                ],
+                correct: 0,
+                explanation: "Une boucle trop amortie ('paresseuse') résulte d'un gain Kp trop faible (action immédiate insuffisante) combiné à un temps d'intégrale Ti trop long. Relever Kp et raccourcir Ti dynamise la boucle.",
+                benchPreset: { loopKey: 'zone_ambiance', ctrlMode: 'PI', kp: 1.2, ti: 210, td: 0, setpoint: 22.0 }
+            },
+
+            // --- 3 CAS SUR LES PERTURBATIONS ET PIÈGES TERRAIN ---
+            {
+                id: 5,
+                category: 'Perturbations & Pièges Terrain',
+                catStyle: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+                title: 'Cas #5 — Chute brutale de température lors du passage en grand débit d’air neuf',
+                situation: "La CTA fonctionne en régime établi à 22 °C. Soudain, l'ouverture du registre d'air neuf en grand débit par −5 °C extérieur fait chuter la température de soufflage à 16,5 °C.",
+                curveObs: "Chute brutale de X à consigne W constante ; la commande Y réagit à la hausse pour compenser.",
+                question: "Comment se comporte un régulateur PI bien réglé face à cette perturbation de charge ?",
+                options: [
+                    "L'action P ouvre immédiatement la vanne face à la chute, puis l'action I augmente le talon d'ouverture (ex: de 35 % à 68 %) pour ramener X exactement à 22 °C",
+                    "La température se stabilise définitivement à 19 °C car la consigne n'a pas changé",
+                    "La vanne se ferme à 0 % par sécurité"
+                ],
+                correct: 0,
+                explanation: "C'est tout l'intérêt de l'action Intégrale : pour maintenir la même consigne (22 °C) avec un air neuf beaucoup plus froid, la vanne doit rester plus ouverte qu'avant. Le terme intégral mémorise ce nouveau besoin énergétique.",
+                benchPreset: { loopKey: 'cta_soufflage', ctrlMode: 'PI', kp: 4.2, ti: 32, td: 0, setpoint: 22.0 }
+            },
+            {
+                id: 6,
+                category: 'Perturbations & Pièges Terrain',
+                catStyle: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+                title: 'Cas #6 — Action dérivée Td activée sur une boucle de pression différentielle bruitée',
+                situation: "Un technicien active Td = 8 s sur la régulation de pression différentielle d'une pompe à vitesse variable. Immédiatement, la consigne de fréquence du variateur se met à vibrer violemment.",
+                curveObs: "Signaux X légèrement bruités par la turbulence de l'eau ; courbe Y hachée avec des pics brutaux.",
+                question: "Pourquoi l'action dérivée est-elle catastrophique sur cette boucle ?",
+                options: [
+                    "La dérivée calcule la pente instantanée (de/dt) : chaque micro-variation du bruit hydraulique génère une pente énorme, amplifiée par Td, usant prématurément l'actionneur",
+                    "La pression différentielle ne peut jamais être régulée par un variateur",
+                    "Le temps d'intégrale Ti annule la dérivée"
+                ],
+                correct: 0,
+                explanation: "Mathematiquement, la dérivée d'un signal bruité à haute fréquence possède une amplitude très élevée. Sur les boucles rapides et bruitées (pression, débit), on règle toujours Td = 0 s (régulateur PI pur).",
+                benchPreset: { loopKey: 'pression_diff', ctrlMode: 'PID', kp: 12.0, ti: 10, td: 8.0, setpoint: 1.20 }
+            },
+            {
+                id: 7,
+                category: 'Perturbations & Pièges Terrain',
+                catStyle: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+                title: 'Cas #7 — Vanne ouverte à 100 % mais consigne jamais atteinte (Saturation)',
+                situation: "Par grand froid, vous réglez la consigne de soufflage à 28 °C. La sortie Y du PID grimpe jusqu'à 100 % (butée haute), mais la température de soufflage plafonne à 23,5 °C.",
+                curveObs: "Courbe Y bloquée à 100 % ; courbe X asymptotique à 23,5 °C sous la consigne W = 28 °C.",
+                question: "S'agit-il d'un mauvais réglage des paramètres Kp/Ti ?",
+                options: [
+                    "Non : le régulateur fait son maximum (100 %), mais l'installation est en saturation physique (puissance batterie ou température d'eau primaire chaudière insuffisante)",
+                    "Oui, il faut monter Kp à 100 pour forcer la vanne à 150 %",
+                    "Oui, il faut passer en mode P seul"
+                ],
+                correct: 0,
+                explanation: "Un régulateur ne peut pas commander un actionneur au-delà de 100 %. Lorsque Y = 100 % et X < W, le problème est physique/hydraulique (eau primaire trop froide, pompe arrêtée, batterie encrassée ou sous-dimensionnée), pas un défaut de paramètres PID.",
+                benchPreset: { loopKey: 'cta_soufflage', ctrlMode: 'PI', kp: 4.2, ti: 32, td: 0, setpoint: 31.0 }
+            },
+
+            // --- 3 CAS SUR LES BONNES PRATIQUES DE RÉGLAGE & MISE EN SERVICE ---
+            {
+                id: 8,
+                category: 'Bonnes Pratiques & Mise en Service',
+                catStyle: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+                title: 'Cas #8 — Ordre méthodologique de réglage PID lors d’une mise en service',
+                situation: "Vous mettez en service une boucle de régulation thermique dont les paramètres usine sont totalement inadaptés. Vous devez régler Kp, Ti et éventuellement Td sur site.",
+                curveObs: "Méthode empirique de terrain (type Ziegler-Nichols amorti / réglage pas à pas).",
+                question: "Quelle est la chronologie recommandée sur le terrain ?",
+                options: [
+                    "1) Désactiver I et D (mode P seul), 2) Régler Kp pour obtenir une réponse rapide sans oscillation entretenue, 3) Introduire Ti (diminuer progressivement) pour annuler l'erreur statique, 4) Ajouter Td uniquement si forte inertie",
+                    "1) Régler Td à fond, 2) Mettre Ti à 1 seconde, 3) Ajuster Kp en dernier",
+                    "Laisser Kp = 0 et régler uniquement Ti"
+                ],
+                correct: 0,
+                explanation: "On règle toujours l'action Proportionnelle en premier (actions I et D neutralisées) pour fixer la nervosité de base de la boucle. On introduit ensuite l'Intégrale (Ti) pour éliminer l'écart statique en réduisant légèrement Kp si nécessaire.",
+                benchPreset: { loopKey: 'cta_soufflage', ctrlMode: 'P', kp: 3.5, ti: 40, td: 0, setpoint: 22.0 }
+            },
+            {
+                id: 9,
+                category: 'Bonnes Pratiques & Mise en Service',
+                catStyle: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+                title: 'Cas #9 — Choix entre PI et PID en génie climatique (CVC)',
+                situation: "Dans un cahier des charges GTB, un automaticien hésite entre configurer toutes les boucles (pression, débit VAV, température soufflage, batterie eau glacée) en PI ou en PID complet.",
+                curveObs: "Comparaison de robustesse entre régulateur PI et régulateur PID sur installations CVC réelles.",
+                question: "Pourquoi plus de 90 % des boucles CVC sont-elles réglées en PI (Td = 0) ?",
+                options: [
+                    "Le PI suffit à annuler l'erreur statique, est beaucoup plus simple à maintenir sur site et évite les instabilités dues au bruit des capteurs ou aux jeux mécaniques des servomoteurs de vannes",
+                    "Les automates GTB modernes ne savent pas calculer l'action dérivée",
+                    "L'action dérivée consomme plus d'électricité sur le bus BACnet"
+                ],
+                correct: 0,
+                explanation: "En CVC, l'action dérivée sollicite inutilement les servomoteurs de vannes (usure mécanique) dès que le signal capteur fluctue légèrement. Le régulateur PI offre le meilleur compromis précision / stabilité / longévité des organes.",
+                benchPreset: { loopKey: 'pression_diff', ctrlMode: 'PI', kp: 14.0, ti: 9, td: 0, setpoint: 1.20 }
+            },
+            {
+                id: 10,
+                category: 'Bonnes Pratiques & Mise en Service',
+                catStyle: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+                title: 'Cas #10 — Prévention de l’emballement intégral (Anti-Windup)',
+                situation: "Une fenêtre reste ouverte pendant 20 minutes en plein hiver dans un bureau. La température chute à 14 °C et la vanne est bloquée à 100 %. Lorsqu'on referme la fenêtre, la pièce surchauffe jusqu'à 25 °C avant de redescendre.",
+                curveObs: "Saturation prolongée à Y = 100 % suivie d'un retard à la fermeture de la vanne lorsque X dépasse W.",
+                question: "Quel mécanisme interne du régulateur empêche ce phénomène ?",
+                options: [
+                    "L'Anti-Windup (anti-emballement intégral) : il bloque l'accumulation du terme intégral dès que la sortie Y atteint ses butées (0 % ou 100 %)",
+                    "L'inversion du sens d'action (Direct / Inverse)",
+                    "La suppression de la sonde extérieure"
+                ],
+                correct: 0,
+                explanation: "Sans Anti-Windup, le terme intégral continue de croître virtuellement (ex: 350 %) pendant que la vanne est déjà à 100 %. Quand la température remonte au-dessus de la consigne, il faut très longtemps pour 'décharger' cet excès d'intégrale. L'Anti-Windup fige l'intégrale en saturation.",
+                benchPreset: { loopKey: 'zone_ambiance', ctrlMode: 'PI', kp: 6.5, ti: 55, td: 0, setpoint: 21.0 }
+            }
+        ];
+
+        // =====================================================================
+        // 4. INITIALISATION & CONTRÔLES INTERFACE
+        // =====================================================================
+        function selectHvacLoop(key) {
+            simState.loopKey = key;
+            const cfg = HVAC_LOOPS[key];
+
+            // Mise à jour des contrôles consigne & PID usine
+            const spInput = document.getElementById('input-setpoint');
+            spInput.min = cfg.minW;
+            spInput.max = cfg.maxW;
+            spInput.step = cfg.stepW;
+            spInput.value = cfg.defaultW.toFixed(cfg.decimals);
+            document.getElementById('unit-w-label').textContent = cfg.unit;
+
+            document.getElementById('loop-title-display').textContent = cfg.name;
+            document.getElementById('syn-act-title').textContent = cfg.actuatorName;
+            document.getElementById('syn-proc-title').textContent = cfg.processName;
+
+            // Basculer symbole vanne vs pompe dans le synoptique
+            if (cfg.actuatorType === 'pump') {
+                document.getElementById('svg-valve-symbol').classList.add('hidden');
+                document.getElementById('svg-pump-symbol').classList.remove('hidden');
+            } else {
+                document.getElementById('svg-valve-symbol').classList.remove('hidden');
+                document.getElementById('svg-pump-symbol').classList.add('hidden');
+            }
+
+            applyFactoryTuning(false);
+            resetSimulation(false);
+            showToast(`Boucle chargée : ${cfg.name}`);
+        }
+
+        function applyFactoryTuning(notify = true) {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            setControllerMode(cfg.factoryPid.mode, false);
+            syncPidParam('kp', cfg.factoryPid.kp);
+            syncPidParam('ti', cfg.factoryPid.ti);
+            syncPidParam('td', cfg.factoryPid.td);
+            if (notify) showToast("Paramètres d'usine stables appliqués.");
+        }
+
+        function simulateOscillationPreset() {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            setControllerMode('PI', false);
+            syncPidParam('kp', Number((cfg.factoryPid.kp * 4.2).toFixed(1)));
+            syncPidParam('ti', Math.max(4, Math.round(cfg.factoryPid.ti * 0.25)));
+            syncPidParam('td', 0);
+            nudgeSetpoint(cfg.stepTestDelta);
+            showToast("Simulation Pompage activée (Kp excessif & Ti court)", "warn");
+        }
+
+        function simulateSlowPreset() {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            setControllerMode('PI', false);
+            syncPidParam('kp', Number(Math.max(0.4, cfg.factoryPid.kp * 0.25).toFixed(1)));
+            syncPidParam('ti', Math.min(240, Math.round(cfg.factoryPid.ti * 3.5)));
+            syncPidParam('td', 0);
+            nudgeSetpoint(cfg.stepTestDelta);
+            showToast("Simulation Réponse Lente activée (Kp faible & Ti long)", "warn");
+        }
+
+        function setControllerMode(mode, notify = true) {
+            simState.ctrlMode = mode;
+            const modes = ['P', 'PI', 'PID', 'MAN'];
+            modes.forEach(m => {
+                const btn = document.getElementById(`ctrl-mode-${m}`);
+                if (!btn) return;
+                if (m === mode) {
+                    btn.className = "py-2 px-1 rounded-xl border text-xs font-extrabold transition cursor-pointer bg-dexCyan/15 border-dexCyan text-dexCyan shadow";
+                } else {
+                    btn.className = "py-2 px-1 rounded-xl border text-xs font-extrabold transition cursor-pointer bg-dexSurface border-dexBorder text-slate-300 hover:text-white";
+                }
+            });
+
+            // Activation / désactivation visuelle des curseurs Ti, Td et Manuel
+            const tiDisabled = (mode === 'P' || mode === 'MAN');
+            const tdDisabled = (mode !== 'PID');
+            const manDisabled = (mode !== 'MAN');
+
+            document.getElementById('slider-ti').disabled = tiDisabled;
+            document.getElementById('num-ti').disabled = tiDisabled;
+            document.getElementById('box-ti').style.opacity = tiDisabled ? '0.45' : '1';
+
+            document.getElementById('slider-td').disabled = tdDisabled;
+            document.getElementById('num-td').disabled = tdDisabled;
+            document.getElementById('box-td').style.opacity = tdDisabled ? '0.45' : '1';
+
+            document.getElementById('slider-manual-y').disabled = manDisabled;
+            document.getElementById('manual-y-box').style.opacity = manDisabled ? '0.55' : '1';
+
+            // Transfert sans à-coup (bumpless transfer) lors du passage Auto <-> Manuel
+            if (mode === 'MAN') {
+                simState.manualY = Math.round(simState.outputY);
+                document.getElementById('slider-manual-y').value = simState.manualY;
+                document.getElementById('manual-y-val').textContent = `${simState.manualY}%`;
+            } else {
+                simState.integralTerm = simState.outputY;
+                simState.filteredDeriv = 0;
+            }
+
+            if (notify) showToast(`Mode régulateur : ${mode === 'MAN' ? 'Manuel (Boucle Ouverte)' : mode}`);
+        }
+
+        function syncPidParam(param, rawVal) {
+            let val = parseFloat(rawVal);
+            if (isNaN(val)) return;
+
+            if (param === 'kp') {
+                val = Math.max(0.1, Math.min(50, val));
+                simState.kp = val;
+                document.getElementById('slider-kp').value = Math.min(25, val);
+                document.getElementById('num-kp').value = val;
+                const xp = (100 / val).toFixed(1);
+                document.getElementById('xp-equivalent').textContent = `XP = ${xp} %`;
+            } else if (param === 'ti') {
+                val = Math.max(1, Math.min(600, val));
+                simState.ti = val;
+                document.getElementById('slider-ti').value = Math.min(240, val);
+                document.getElementById('num-ti').value = val;
+            } else if (param === 'td') {
+                val = Math.max(0, Math.min(100, val));
+                simState.td = val;
+                document.getElementById('slider-td').value = Math.min(40, val);
+                document.getElementById('num-td').value = val;
+            }
+
+            const ki = (simState.kp / simState.ti).toFixed(3);
+            const kd = (simState.kp * simState.td).toFixed(1);
+            document.getElementById('ki-equivalent').textContent = `Ki = ${ki} s⁻¹`;
+            document.getElementById('kd-equivalent').textContent = `Kd = ${kd} s`;
+        }
+
+        function updateManualY(val) {
+            simState.manualY = parseFloat(val);
+            document.getElementById('manual-y-val').textContent = `${simState.manualY}%`;
+        }
+
+        function updateSetpointFromInput(rawVal) {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            let v = parseFloat(rawVal);
+            if (isNaN(v)) return;
+            v = Math.max(cfg.minW, Math.min(cfg.maxW, v));
+            applyNewSetpoint(v);
+        }
+
+        function nudgeSetpoint(delta) {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            const step = Math.abs(delta) === 1 ? cfg.stepW * Math.sign(delta) : delta;
+            const next = Math.max(cfg.minW, Math.min(cfg.maxW, Number((simState.setpoint + step).toFixed(cfg.decimals))));
+            applyNewSetpoint(next);
+        }
+
+        function applyNewSetpoint(newW) {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            if (Math.abs(newW - simState.setpoint) > 1e-4) {
+                simState.stepRefStart = simState.measuredX;
+                simState.stepRefTarget = newW;
+                simState.stepStartTime = simState.simTime;
+                simState.maxOvershootPct = 0;
+                simState.settlingTimeSec = null;
+                simState.signCrossings = 0;
+                simState.eventsMarkers.push({ time: simState.simTime, label: `W→${newW.toFixed(cfg.decimals)}`, color: '#38BDF8' });
+            }
+            simState.setpoint = newW;
+            document.getElementById('input-setpoint').value = newW.toFixed(cfg.decimals);
+        }
+
+        function setOperatingProfile(prof) {
+            simState.profile = prof;
+            ['normal', 'shock', 'step'].forEach(p => {
+                const btn = document.getElementById(`profile-${p}`);
+                if (p === prof) {
+                    btn.className = "px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer bg-dexCyan/15 border-dexCyan text-dexCyan";
+                } else {
+                    btn.className = "px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer bg-dexSurface border-dexBorder text-slate-300 hover:text-white";
+                }
+            });
+
+            const names = {
+                normal: 'Régime Normal',
+                shock: 'Choc Thermique / Charge',
+                step: 'Test Pas de Consigne'
+            };
+            document.getElementById('syn-profile-txt').textContent = names[prof];
+            simState.stepTimer = 0;
+
+            if (prof === 'shock') {
+                simState.eventsMarkers.push({ time: simState.simTime, label: 'Choc Charge', color: '#F59E0B' });
+            }
+            showToast(`Profil activé : ${names[prof]}`);
+        }
+
+        function injectDisturbance() {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            simState.disturbancePulse = cfg.disturbanceMagnitude;
+            simState.disturbanceDecayTimer = 28; // Perturbation soutenue pendant 28s simulées
+            simState.eventsMarkers.push({ time: simState.simTime, label: 'Perturbation', color: '#F59E0B' });
+            showToast(`Perturbation injectée : ${cfg.disturbanceLabel}`, 'warn');
+        }
+
+        function togglePause() {
+            simState.paused = !simState.paused;
+            const btn = document.getElementById('btn-pause-resume');
+            const badge = document.getElementById('header-run-badge');
+            if (simState.paused) {
+                btn.textContent = '▶ Reprendre';
+                btn.className = 'px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition cursor-pointer';
+                badge.textContent = '❚❚ EN PAUSE';
+                badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+            } else {
+                btn.textContent = '⏸ Pause';
+                btn.className = 'px-3 py-1.5 rounded-xl bg-dexSurface hover:bg-slate-700 border border-dexBorder text-white text-xs font-bold transition cursor-pointer';
+                badge.textContent = '● SIMULATION ACTIVE';
+                badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+            }
+        }
+
+        function setSimMultiplier(mult) {
+            simState.speedMult = mult;
+            [1, 2, 5].forEach(m => {
+                const btn = document.getElementById(`spd-${m}`);
+                btn.className = m === mult
+                    ? 'px-2 py-1 rounded-lg text-[10px] font-mono font-bold bg-dexCyan text-dexBg cursor-pointer'
+                    : 'px-2 py-1 rounded-lg text-[10px] font-mono font-bold text-slate-400 hover:text-white cursor-pointer';
+            });
+        }
+
+        function toggleSensorNoise(enabled) {
+            simState.sensorNoiseEnabled = enabled;
+            showToast(enabled ? "Bruit réaliste de sonde activé" : "Signal sonde idéal (sans bruit)");
+        }
+
+        function resetSimulation(notify = true) {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            const eqY = Math.max(5, Math.min(95, (cfg.defaultW - cfg.ambientBase) / cfg.processGain));
+
+            simState.simTime = 0;
+            simState.stepTimer = 0;
+            simState.setpoint = cfg.defaultW;
+            document.getElementById('input-setpoint').value = cfg.defaultW.toFixed(cfg.decimals);
+
+            simState.processTrueX = cfg.defaultW;
+            simState.measuredX = cfg.defaultW;
+            simState.prevMeasurement = cfg.defaultW;
+            simState.outputY = eqY;
+            simState.actuatorPos = eqY;
+            simState.prevActuatorPos = eqY;
+            simState.integralTerm = eqY;
+            simState.filteredDeriv = 0;
+            simState.disturbancePulse = 0;
+            simState.disturbanceDecayTimer = 0;
+
+            // Pré-remplissage du buffer de retard pur
+            const stepsDelay = Math.max(1, Math.round(cfg.deadTime / 0.2));
+            simState.delayBuffer = Array(stepsDelay).fill(eqY);
+
+            // Pré-remplissage de l'historique initial (60 points stables)
+            simState.history = [];
+            simState.eventsMarkers = [];
+            for (let i = -30; i <= 0; i += 0.5) {
+                simState.history.push({
+                    t: Number(i.toFixed(1)),
+                    w: cfg.defaultW,
+                    x: cfg.defaultW,
+                    y: eqY
+                });
+            }
+
+            simState.stepRefStart = cfg.defaultW;
+            simState.stepRefTarget = cfg.defaultW;
+            simState.maxOvershootPct = 0;
+            simState.settlingTimeSec = null;
+            simState.signCrossings = 0;
+
+            updateSynopticAndMetrics();
+            drawTrendCanvas();
+            if (notify) showToast("Simulation réinitialisée à l'équilibre.");
+        }
+
+        // =====================================================================
+        // 5. BOUCLE DE CALCUL PHYSIQUE & ALGORITHME PID NUMÉRIQUE (dt = 0.2s)
+        // =====================================================================
+        function stepPhysicsAndPid(dt) {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            simState.simTime += dt;
+
+            // Gestion profil "Test Pas de Consigne" automatique toutes les 35s
+            if (simState.profile === 'step') {
+                simState.stepTimer += dt;
+                if (simState.stepTimer >= 35) {
+                    simState.stepTimer = 0;
+                    const newW = simState.stepDirection > 0
+                        ? Math.min(cfg.maxW, Number((cfg.defaultW + cfg.stepTestDelta).toFixed(cfg.decimals)))
+                        : cfg.defaultW;
+                    simState.stepDirection *= -1;
+                    applyNewSetpoint(newW);
+                }
+            }
+
+            // Gestion décroissance perturbation transitoire
+            if (simState.disturbanceDecayTimer > 0) {
+                simState.disturbanceDecayTimer = Math.max(0, simState.disturbanceDecayTimer - dt);
+                if (simState.disturbanceDecayTimer === 0) {
+                    simState.disturbancePulse = 0;
+                }
+            }
+
+            const activeDisturbance = (simState.profile === 'shock' ? cfg.disturbanceMagnitude : 0) + simState.disturbancePulse;
+
+            // 1. Mesure avec bruit de sonde réaliste
+            const noise = simState.sensorNoiseEnabled ? (Math.random() - 0.5) * 2 * cfg.noiseAmp : 0;
+            const currentX = simState.processTrueX + noise;
+            simState.measuredX = currentX;
+
+            // 2. Calcul de l'erreur e = W - X
+            const error = simState.setpoint - currentX;
+
+            // 3. Calcul Régulateur PID (Mode Manuel ou P / PI / PID avec Anti-Windup)
+            if (simState.ctrlMode === 'MAN') {
+                simState.pContrib = 0;
+                simState.iContrib = simState.manualY;
+                simState.dContrib = 0;
+                simState.outputY = simState.manualY;
+                simState.antiWindupActive = false;
+            } else {
+                // Action Proportionnelle P
+                const P = simState.kp * error;
+
+                // Action Dérivée D filtrée (passe-bas ordre 1 sur mesure pour éviter dérivation du pas de consigne)
+                let D = 0;
+                if (simState.ctrlMode === 'PID' && simState.td > 0) {
+                    const alphaD = dt / (0.15 * simState.td + dt);
+                    const rawDeriv = -(currentX - simState.prevMeasurement) / dt;
+                    simState.filteredDeriv = simState.filteredDeriv + alphaD * (rawDeriv - simState.filteredDeriv);
+                    D = simState.kp * simState.td * simState.filteredDeriv;
+                } else {
+                    simState.filteredDeriv = 0;
+                }
+
+                // Action Intégrale I avec Anti-Windup conditionnel (clamping)
+                let candidateI = simState.integralTerm;
+                if ((simState.ctrlMode === 'PI' || simState.ctrlMode === 'PID') && simState.ti > 0) {
+                    candidateI += (simState.kp / simState.ti) * error * dt;
+                } else {
+                    // En mode P seul, talon de polarisation neutre à 35% pour visualiser l'erreur statique
+                    candidateI = 35.0;
+                }
+
+                const rawSum = P + candidateI + D;
+                if (rawSum > 100) {
+                    simState.outputY = 100;
+                    simState.antiWindupActive = (simState.ctrlMode !== 'P');
+                    // N'accepter l'intégration que si elle réduit la saturation
+                    if (error < 0 && simState.ctrlMode !== 'P') simState.integralTerm = candidateI;
+                } else if (rawSum < 0) {
+                    simState.outputY = 0;
+                    simState.antiWindupActive = (simState.ctrlMode !== 'P');
+                    if (error > 0 && simState.ctrlMode !== 'P') simState.integralTerm = candidateI;
+                } else {
+                    simState.outputY = rawSum;
+                    simState.antiWindupActive = false;
+                    if (simState.ctrlMode !== 'P') simState.integralTerm = candidateI;
+                }
+
+                simState.pContrib = P;
+                simState.iContrib = simState.integralTerm;
+                simState.dContrib = D;
+            }
+
+            simState.prevMeasurement = currentX;
+
+            // 4. Dynamique Actionneur (temps de course réaliste vanne / variateur)
+            simState.prevActuatorPos = simState.actuatorPos;
+            const maxSlewRate = cfg.actuatorType === 'pump' ? 35.0 : 14.0; // % par seconde
+            const actDiff = simState.outputY - simState.actuatorPos;
+            const maxStep = maxSlewRate * dt;
+            if (Math.abs(actDiff) <= maxStep) {
+                simState.actuatorPos = simState.outputY;
+            } else {
+                simState.actuatorPos += Math.sign(actDiff) * maxStep;
+            }
+
+            // 5. Retard pur (file FIFO) + Équation différentielle thermique/hydraulique du 1er ordre
+            simState.delayBuffer.push(simState.actuatorPos);
+            const delayedU = simState.delayBuffer.shift() ?? simState.actuatorPos;
+
+            const steadyTargetX = cfg.ambientBase + cfg.processGain * delayedU + activeDisturbance;
+            simState.processTrueX += ((steadyTargetX - simState.processTrueX) / cfg.tau) * dt;
+
+            // 6. Calcul des métriques de performance transitoire
+            evaluatePerformanceMetrics(cfg, error);
+
+            // 7. Enregistrement dans l'historique roulant (toutes les 0.4s simulées)
+            const lastPt = simState.history[simState.history.length - 1];
+            if (!lastPt || (simState.simTime - lastPt.t) >= 0.39) {
+                simState.history.push({
+                    t: Number(simState.simTime.toFixed(1)),
+                    w: simState.setpoint,
+                    x: simState.measuredX,
+                    y: simState.outputY
+                });
+                if (simState.history.length > 260) {
+                    simState.history.shift();
+                }
+                // Nettoyer les marqueurs trop anciens
+                const minT = simState.history[0].t;
+                simState.eventsMarkers = simState.eventsMarkers.filter(m => m.time >= minT);
+            }
+        }
+
+        function evaluatePerformanceMetrics(cfg, error) {
+            const absErr = Math.abs(error);
+            const stepAmplitude = Math.abs(simState.stepRefTarget - simState.stepRefStart);
+
+            // Suivi dépassement (overshoot) après un pas de consigne
+            if (stepAmplitude > 0.1) {
+                const dir = Math.sign(simState.stepRefTarget - simState.stepRefStart);
+                const overshootVal = (simState.measuredX - simState.stepRefTarget) * dir;
+                if (overshootVal > 0) {
+                    const pct = (overshootVal / stepAmplitude) * 100;
+                    if (pct > simState.maxOvershootPct) {
+                        simState.maxOvershootPct = Math.min(250, pct);
+                    }
+                }
+                // Temps de réponse à ±2% de la consigne
+                const band = Math.max(cfg.stepW * 0.25, stepAmplitude * 0.04);
+                if (absErr <= band && simState.settlingTimeSec === null && (simState.simTime - simState.stepStartTime) > 1) {
+                    simState.settlingTimeSec = Math.round(simState.simTime - simState.stepStartTime);
+                } else if (absErr > band) {
+                    simState.settlingTimeSec = null;
+                }
+            }
+
+            // Détection oscillations (passages par zéro de l'erreur)
+            const errSign = Math.abs(error) > (cfg.noiseAmp * 1.6) ? Math.sign(error) : 0;
+            if (errSign !== 0 && simState.lastErrSign !== 0 && errSign !== simState.lastErrSign) {
+                simState.signCrossings++;
+            }
+            if (errSign !== 0) simState.lastErrSign = errSign;
+
+            // Diagnostic expert en direct
+            if (simState.ctrlMode === 'MAN') {
+                simState.diagnosticLabel = 'Mode Manuel (Boucle Ouverte)';
+                simState.diagnosticLevel = 'warn';
+            } else if (simState.outputY >= 99.5 || simState.outputY <= 0.5) {
+                simState.diagnosticLabel = simState.outputY >= 99.5 ? 'Actionneur Saturé (Butée 100%)' : 'Actionneur Saturé (Butée 0%)';
+                simState.diagnosticLevel = 'crit';
+            } else if (simState.signCrossings >= 4 && (simState.outputY > 85 || simState.outputY < 15 || absErr > cfg.stepW * 0.8)) {
+                simState.diagnosticLabel = 'Pompage / Oscillations';
+                simState.diagnosticLevel = 'crit';
+            } else if (simState.ctrlMode === 'P' && absErr > cfg.stepW * 0.6) {
+                simState.diagnosticLabel = 'Erreur Statique (Mode P seul)';
+                simState.diagnosticLevel = 'warn';
+            } else if (absErr > cfg.stepW * 1.1 && (simState.simTime - simState.stepStartTime) > cfg.tau * 1.8) {
+                simState.diagnosticLabel = 'Réponse Trop Lente';
+                simState.diagnosticLevel = 'warn';
+            } else if (simState.maxOvershootPct > 25) {
+                simState.diagnosticLabel = 'Dépassement Élevé (Overshoot)';
+                simState.diagnosticLevel = 'warn';
+            } else {
+                simState.diagnosticLabel = 'Stable & Précis';
+                simState.diagnosticLevel = 'ok';
+            }
+        }
+
+        // =====================================================================
+        // 6. MISE À JOUR DU SYNOPTIQUE SVG & INDICATEURS DOM
+        // =====================================================================
+        function updateSynopticAndMetrics() {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            const dec = cfg.decimals;
+            const err = simState.setpoint - simState.measuredX;
+
+            // Chrono
+            document.getElementById('sim-timer-display').textContent = `${simState.simTime.toFixed(1)} s`;
+
+            // Synoptique SVG
+            document.getElementById('syn-w-val').textContent = `${simState.setpoint.toFixed(dec)} ${cfg.unit}`;
+            document.getElementById('syn-err-val').textContent = `${err >= 0 ? '+' : ''}${err.toFixed(dec)}`;
+            document.getElementById('syn-err-val').setAttribute('fill', Math.abs(err) > cfg.stepW ? '#F59E0B' : '#10B981');
+
+            document.getElementById('syn-pid-mode').textContent = simState.ctrlMode === 'MAN'
+                ? 'Mode MANUEL (Forçage direct)'
+                : `Mode ${simState.ctrlMode} • Kp=${simState.kp} | Ti=${simState.ti}s${simState.ctrlMode === 'PID' ? ` | Td=${simState.td}s` : ''}`;
+
+            document.getElementById('syn-p-term').textContent = `P : ${simState.pContrib >= 0 ? '+' : ''}${simState.pContrib.toFixed(1)} %`;
+            document.getElementById('syn-i-term').textContent = `I : ${simState.iContrib >= 0 ? '+' : ''}${simState.iContrib.toFixed(1)} %`;
+            document.getElementById('syn-d-term').textContent = `D : ${simState.dContrib >= 0 ? '+' : ''}${simState.dContrib.toFixed(1)} %`;
+            document.getElementById('syn-y-val').textContent = `${simState.outputY.toFixed(1)} %`;
+
+            // Alertes saturation & Anti-Windup
+            const satWarn = document.getElementById('syn-sat-warning');
+            const awBadge = document.getElementById('antiwindup-badge');
+            if (simState.outputY >= 99.5) {
+                satWarn.textContent = '⚠ BUTÉE HAUTE 100 % (SATURATION)';
+                satWarn.setAttribute('fill', '#EF4444');
+            } else if (simState.outputY <= 0.5) {
+                satWarn.textContent = '⚠ BUTÉE BASSE 0 % (FERMÉ)';
+                satWarn.setAttribute('fill', '#F59E0B');
+            } else {
+                satWarn.textContent = 'Plage de modulation normale (0–100%)';
+                satWarn.setAttribute('fill', '#64748B');
+            }
+
+            if (simState.antiWindupActive) {
+                awBadge.textContent = 'Anti-Windup : ACTIF (Blocage I)';
+                awBadge.className = 'px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/50 text-amber-300 font-mono text-[11px] font-bold';
+            } else {
+                awBadge.textContent = 'Anti-Windup : ARMÉ';
+                awBadge.className = 'px-2.5 py-1 rounded-lg bg-dexSurface border border-dexBorder text-slate-300 font-mono text-[11px] font-bold';
+            }
+
+            // Actionneur (Vanne ou Variateur Pompe)
+            document.getElementById('syn-act-pct').textContent = cfg.actuatorType === 'pump'
+                ? `${simState.actuatorPos.toFixed(0)}% (${(simState.actuatorPos * 0.5).toFixed(1)}Hz)`
+                : `${simState.actuatorPos.toFixed(1)} %`;
+
+            const actDelta = simState.actuatorPos - simState.prevActuatorPos;
+            const actDirEl = document.getElementById('syn-act-dir');
+            if (actDelta > 0.08) {
+                actDirEl.textContent = cfg.actuatorType === 'pump' ? '▲ Accélération' : '▲ Ouverture';
+                actDirEl.setAttribute('fill', '#EA580C');
+            } else if (actDelta < -0.08) {
+                actDirEl.textContent = cfg.actuatorType === 'pump' ? '▼ Ralentissement' : '▼ Fermeture';
+                actDirEl.setAttribute('fill', '#38BDF8');
+            } else {
+                actDirEl.textContent = '● Stabilisé';
+                actDirEl.setAttribute('fill', '#10B981');
+            }
+
+            const actBox = document.getElementById('syn-act-box');
+            const actLimitEl = document.getElementById('syn-act-limit');
+            if (simState.actuatorPos >= 99.5) {
+                actBox.setAttribute('stroke', '#EF4444');
+                actLimitEl.textContent = 'ALERTE : BUTÉE 100 % ATTEINTE';
+                actLimitEl.setAttribute('fill', '#EF4444');
+            } else if (simState.actuatorPos <= 0.5) {
+                actBox.setAttribute('stroke', '#F59E0B');
+                actLimitEl.textContent = 'ALERTE : BUTÉE 0 % ATTEINTE';
+                actLimitEl.setAttribute('fill', '#F59E0B');
+            } else {
+                actBox.setAttribute('stroke', '#334155');
+                actLimitEl.textContent = 'Course actionneur libre';
+                actLimitEl.setAttribute('fill', '#94A3B8');
+            }
+
+            // Animation visuelle clapet vanne ou vitesse roue pompe
+            if (cfg.actuatorType === 'valve') {
+                const plug = document.getElementById('svg-valve-plug');
+                const lift = (simState.actuatorPos / 100) * 11;
+                plug.setAttribute('y', (-12 - lift).toFixed(1));
+            } else {
+                const impeller = document.getElementById('svg-pump-impeller');
+                const speedDur = simState.actuatorPos < 3 ? '0s' : `${Math.max(0.25, 2.5 - (simState.actuatorPos / 100) * 2.2).toFixed(2)}s`;
+                impeller.style.setProperty('--spin-dur', speedDur);
+            }
+
+            // Processus & Perturbation
+            document.getElementById('syn-x-val').textContent = `${simState.measuredX.toFixed(dec)} ${cfg.unit}`;
+            document.getElementById('syn-proc-dyn').textContent = `Inertie τ=${cfg.tau}s • Retard θ=${cfg.deadTime}s`;
+
+            const hasDist = simState.profile === 'shock' || simState.disturbanceDecayTimer > 0;
+            const distBadge = document.getElementById('disturbance-active-badge');
+            const distInfo = document.getElementById('syn-dist-info');
+            if (hasDist) {
+                distBadge.classList.remove('hidden');
+                distInfo.textContent = `⚡ ${cfg.disturbanceLabel}`;
+                distInfo.setAttribute('fill', '#F59E0B');
+            } else {
+                distBadge.classList.add('hidden');
+                distInfo.textContent = 'Charge ext : Nominale';
+                distInfo.setAttribute('fill', '#38BDF8');
+            }
+
+            // Métriques de performance
+            document.getElementById('metric-error').textContent = `${Math.abs(err).toFixed(dec)} ${cfg.unit}`;
+            document.getElementById('metric-error-sub').textContent = Math.abs(err) <= cfg.stepW * 0.3 ? 'Précis' : 'Écart actif';
+            document.getElementById('metric-overshoot').textContent = `${simState.maxOvershootPct.toFixed(1)} %`;
+            document.getElementById('metric-settling').textContent = simState.settlingTimeSec !== null ? `${simState.settlingTimeSec} s` : 'En cours...';
+            document.getElementById('metric-osc-count').textContent = `Osc: ${simState.signCrossings}`;
+
+            // Badges de diagnostic
+            let badgeClass = 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+            if (simState.diagnosticLevel === 'warn') badgeClass = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+            if (simState.diagnosticLevel === 'crit') badgeClass = 'bg-red-500/20 text-red-300 border-red-500/50 animate-pulse-fast';
+
+            const diagBadge = document.getElementById('metric-diag-badge');
+            diagBadge.textContent = simState.diagnosticLabel;
+            diagBadge.className = `inline-block px-2.5 py-1 rounded-lg text-xs font-mono font-extrabold border ${badgeClass}`;
+
+            const navBadge = document.getElementById('nav-diag-badge');
+            navBadge.textContent = `● ${simState.diagnosticLabel.toUpperCase()}`;
+            navBadge.className = `px-3 py-1 rounded-full text-xs font-mono font-extrabold border ${badgeClass}`;
+
+            // Conseil automatique contextuel
+            const advisorText = document.getElementById('live-advisor-text');
+            if (simState.diagnosticLabel.includes('Pompage')) {
+                advisorText.textContent = "Pompage détecté ! Réduisez le gain proportionnel Kp (augmentez XP) et vérifiez que Ti n'est pas trop court.";
+            } else if (simState.diagnosticLabel.includes('Erreur Statique')) {
+                advisorText.textContent = "En mode P seul, un écart résiduel persiste pour maintenir la vanne ouverte. Basculez en mode PI pour annuler l'erreur statique.";
+            } else if (simState.diagnosticLabel.includes('Saturé')) {
+                advisorText.textContent = "L'actionneur est en butée (100% ou 0%). L'Anti-Windup bloque l'intégrale. Vérifiez si la consigne est atteignable physiquement.";
+            } else if (simState.diagnosticLabel.includes('Lente')) {
+                advisorText.textContent = "Réaction lente : augmentez progressivement Kp puis diminuez le temps d'intégrale Ti pour accélérer le retour à la consigne.";
+            } else if (simState.ctrlMode === 'PID' && simState.td > 2 && cfg.noiseAmp > 0.03) {
+                advisorText.textContent = "Attention : l'action dérivée Td amplifie le bruit de la sonde et sollicite fortement l'actionneur. Privilégiez Td = 0 (PI).";
+            } else {
+                advisorText.textContent = "Boucle stable et bien amortie. Vous pouvez injecter une perturbation ou lancer le 'Test Pas de Consigne' pour vérifier la robustesse.";
+            }
+        }
+
+        // =====================================================================
+        // 7. GRAPHIQUE OSCILLOSCOPE TEMPS RÉEL (HTML5 CANVAS HAUTE PRÉCISION)
+        // =====================================================================
+        function drawTrendCanvas() {
+            const canvas = document.getElementById('pid-trend-canvas');
+            if (!canvas) return;
+            const rect = canvas.parentElement.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            const w = Math.max(300, rect.width - 16);
+            const h = Math.max(240, rect.height - 16);
+
+            if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+                canvas.width = Math.round(w * dpr);
+                canvas.height = Math.round(h * dpr);
+            }
+
+            const ctx = canvas.getContext('2d');
+            ctx.save();
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, w, h);
+
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            const padL = 52, padR = 48, padT = 20, padB = 28;
+            const plotW = w - padL - padR;
+            const plotH = h - padT - padB;
+
+            // Échelle Y gauche (Grandeur physique X & W)
+            const yMin = cfg.loopKey === 'pression_diff' ? 0 : Math.floor(cfg.minW - 4);
+            const yMax = cfg.loopKey === 'pression_diff' ? 2.6 : Math.ceil(cfg.maxW + 4);
+
+            // Grille horizontale + graduations gauche (°C ou bar) & droite (0-100%)
+            ctx.strokeStyle = '#1E293B';
+            ctx.lineWidth = 1;
+            ctx.font = '10px "JetBrains Mono", monospace';
+
+            for (let i = 0; i <= 5; i++) {
+                const ratio = i / 5;
+                const y = padT + plotH * ratio;
+                ctx.beginPath();
+                ctx.moveTo(padL, y);
+                ctx.lineTo(w - padR, y);
+                ctx.stroke();
+
+                const physVal = yMax - ratio * (yMax - yMin);
+                const pctVal = Math.round(100 - ratio * 100);
+
+                ctx.fillStyle = '#94A3B8';
+                ctx.textAlign = 'right';
+                ctx.fillText(`${physVal.toFixed(cfg.decimals)}${cfg.unit}`, padL - 6, y + 3);
+
+                ctx.fillStyle = '#EA580C';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${pctVal}%`, w - padR + 6, y + 3);
+            }
+
+            const hist = simState.history;
+            if (hist.length < 2) {
+                ctx.restore();
+                return;
+            }
+
+            const tStart = hist[0].t;
+            const tEnd = hist[hist.length - 1].t;
+            const tSpan = Math.max(1, tEnd - tStart);
+
+            const toX = (t) => padL + ((t - tStart) / tSpan) * plotW;
+            const toYPhys = (v) => padT + plotH - ((Math.max(yMin, Math.min(yMax, v)) - yMin) / (yMax - yMin)) * plotH;
+            const toYPct = (p) => padT + plotH - (Math.max(0, Math.min(100, p)) / 100) * plotH;
+
+            // Axe X (repères temps)
+            ctx.fillStyle = '#64748B';
+            ctx.textAlign = 'center';
+            for (let i = 0; i <= 4; i++) {
+                const tMark = tStart + (tSpan * i) / 4;
+                ctx.fillText(`${tMark.toFixed(0)}s`, toX(tMark), h - 8);
+            }
+
+            // Marqueurs d'événements (Perturbation / Pas de consigne)
+            simState.eventsMarkers.forEach(ev => {
+                if (ev.time >= tStart && ev.time <= tEnd) {
+                    const mx = toX(ev.time);
+                    ctx.save();
+                    ctx.strokeStyle = ev.color;
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(mx, padT);
+                    ctx.lineTo(mx, padT + plotH);
+                    ctx.stroke();
+                    ctx.fillStyle = ev.color;
+                    ctx.font = 'bold 9px "JetBrains Mono", monospace';
+                    ctx.fillText(ev.label, mx, padT - 5);
+                    ctx.restore();
+                }
+            });
+
+            // 1. Courbe Commande PID Y (0-100%) avec aire translucide
+            if (document.getElementById('chk-show-y')?.checked) {
+                ctx.save();
+                ctx.beginPath();
+                hist.forEach((pt, idx) => {
+                    const x = toX(pt.t);
+                    const y = toYPct(pt.y);
+                    if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.strokeStyle = '#EA580C';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.lineTo(toX(hist[hist.length - 1].t), padT + plotH);
+                ctx.lineTo(toX(hist[0].t), padT + plotH);
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(234, 88, 12, 0.10)';
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // 2. Courbe Consigne W (pointillés cyan)
+            if (document.getElementById('chk-show-w')?.checked) {
+                ctx.save();
+                ctx.strokeStyle = '#38BDF8';
+                ctx.lineWidth = 2.2;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                hist.forEach((pt, idx) => {
+                    const x = toX(pt.t);
+                    const y = toYPhys(pt.w);
+                    if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // 3. Courbe Mesure X (ligne continue émeraude)
+            if (document.getElementById('chk-show-x')?.checked) {
+                ctx.save();
+                ctx.strokeStyle = '#10B981';
+                ctx.lineWidth = 2.6;
+                ctx.beginPath();
+                hist.forEach((pt, idx) => {
+                    const x = toX(pt.t);
+                    const y = toYPhys(pt.x);
+                    if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // Réticule d'inspection au survol souris
+            if (simState.hoverIndex !== null && hist[simState.hoverIndex]) {
+                const pt = hist[simState.hoverIndex];
+                const hx = toX(pt.t);
+                ctx.save();
+                ctx.strokeStyle = '#94A3B8';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(hx, padT);
+                ctx.lineTo(hx, padT + plotH);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            ctx.restore();
+        }
+
+        // Interaction survol Canvas
+        function setupCanvasHover() {
+            const canvas = document.getElementById('pid-trend-canvas');
+            const tooltip = document.getElementById('canvas-hover-tooltip');
+            if (!canvas || !tooltip) return;
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const relX = e.clientX - rect.left - 52;
+                const plotW = rect.width - 100;
+                const hist = simState.history;
+                if (plotW <= 0 || hist.length < 2) return;
+
+                const ratio = Math.max(0, Math.min(1, relX / plotW));
+                const idx = Math.round(ratio * (hist.length - 1));
+                simState.hoverIndex = idx;
+                const pt = hist[idx];
+                const cfg = HVAC_LOOPS[simState.loopKey];
+
+                tooltip.classList.remove('hidden');
+                tooltip.innerHTML = `
+                    <div class="text-slate-400">Temps : <strong class="text-white">${pt.t.toFixed(1)} s</strong></div>
+                    <div class="text-dexCyan">Consigne W : <strong>${pt.w.toFixed(cfg.decimals)} ${cfg.unit}</strong></div>
+                    <div class="text-dexEmerald">Mesure X : <strong>${pt.x.toFixed(cfg.decimals)} ${cfg.unit}</strong></div>
+                    <div class="text-dexOrange">Commande Y : <strong>${pt.y.toFixed(1)} %</strong></div>
+                `;
+                if (simState.paused) drawTrendCanvas();
+            });
+
+            canvas.addEventListener('mouseleave', () => {
+                simState.hoverIndex = null;
+                tooltip.classList.add('hidden');
+                if (simState.paused) drawTrendCanvas();
+            });
+        }
+
+        // =====================================================================
+        // 8. MODULE DE 10 CAS PRATIQUES TERRAIN (QCM & CHARGEMENT BANC D'ESSAI)
+        // =====================================================================
+        function selectPracticalCase(idx) {
+            simState.currentCaseIdx = idx;
+            renderPracticalCases();
+        }
+
+        function answerPracticalCase(optIdx) {
+            const cIdx = simState.currentCaseIdx;
+            simState.caseAnswers[cIdx] = optIdx;
+            renderPracticalCases();
+
+            const isRight = optIdx === PID_PRACTICAL_CASES[cIdx].correct;
+            showToast(isRight ? 'Bonne réponse ! Diagnostic PID validé.' : 'Réponse incorrecte — Consultez l’explication technique.', isRight ? 'success' : 'error');
+        }
+
+        function loadCaseIntoTestBench(caseIdx) {
+            const c = PID_PRACTICAL_CASES[caseIdx];
+            if (!c || !c.benchPreset) return;
+
+            const p = c.benchPreset;
+            document.getElementById('loop-selector').value = p.loopKey;
+            selectHvacLoop(p.loopKey);
+            setControllerMode(p.ctrlMode, false);
+            syncPidParam('kp', p.kp);
+            syncPidParam('ti', p.ti);
+            syncPidParam('td', p.td);
+            applyNewSetpoint(p.setpoint);
+
+            switchView('bench');
+            showToast(`Cas #${c.id} chargé en direct sur le banc d'essai !`);
+        }
+
+        function renderPracticalCases() {
+            let score = 0;
+            PID_PRACTICAL_CASES.forEach((c, i) => {
+                if (simState.caseAnswers[i] === c.correct) score++;
+            });
+            document.getElementById('cases-score-pill').textContent = `${score} / 10`;
+            document.getElementById('cases-score-big').textContent = `${score} / 10`;
+
+            const navGrid = document.getElementById('cases-nav-grid');
+            navGrid.innerHTML = PID_PRACTICAL_CASES.map((c, idx) => {
+                const active = idx === simState.currentCaseIdx;
+                const answered = simState.caseAnswers[idx] !== undefined;
+                const ok = answered && simState.caseAnswers[idx] === c.correct;
+
+                let cls = 'bg-dexSurface border-dexBorder text-slate-300 hover:border-slate-500';
+                if (active) cls = 'bg-dexCyan text-dexBg border-dexCyan font-extrabold shadow';
+                else if (answered) cls = ok ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'bg-red-500/20 border-red-500/50 text-red-300';
+
+                return `
+                    <button type="button" onclick="selectPracticalCase(${idx})" class="py-2 px-2 rounded-xl border text-xs font-mono font-bold transition cursor-pointer ${cls}">
+                        Cas #${idx + 1} ${answered ? (ok ? '✓' : '✗') : ''}
+                    </button>
+                `;
+            }).join('');
+
+            const activeCase = PID_PRACTICAL_CASES[simState.currentCaseIdx];
+            const chosen = simState.caseAnswers[simState.currentCaseIdx];
+            const isAnswered = chosen !== undefined;
+
+            const card = document.getElementById('case-active-card');
+            card.innerHTML = `
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="px-2.5 py-1 rounded-lg border text-xs font-bold ${activeCase.catStyle}">${activeCase.category}</span>
+                        <span class="font-mono text-xs text-slate-400">Scénario ${simState.currentCaseIdx + 1} / 10</span>
+                    </div>
+                    <button type="button" onclick="loadCaseIntoTestBench(${simState.currentCaseIdx})" class="px-3 py-1.5 rounded-xl bg-dexOrange/20 hover:bg-dexOrange/30 border border-dexOrange/50 text-orange-300 text-xs font-extrabold transition cursor-pointer">
+                        🔬 Reproduire ce cas sur le banc d'essai →
+                    </button>
+                </div>
+
+                <div>
+                    <h3 class="text-base sm:text-lg font-extrabold text-white">${activeCase.title}</h3>
+                    <p class="text-xs sm:text-sm text-slate-300 leading-relaxed mt-2">${activeCase.situation}</p>
+                </div>
+
+                <div class="p-3 rounded-xl bg-dexCard border border-dexBorder font-mono text-xs text-dexCyan">
+                    <strong>Observation courbe &amp; télémétrie :</strong> ${activeCase.curveObs}
+                </div>
+
+                <div class="text-xs sm:text-sm font-bold text-white pt-1">
+                    ${activeCase.question}
+                </div>
+
+                <div class="space-y-2.5">
+                    ${activeCase.options.map((opt, oIdx) => {
+                        let style = 'bg-dexCard hover:bg-dexSurface border-dexBorder text-slate-200';
+                        let badge = 'bg-dexBg text-slate-400 border-dexBorder';
+
+                        if (isAnswered) {
+                            if (oIdx === activeCase.correct) {
+                                style = 'bg-emerald-950/50 border-emerald-500 text-emerald-200';
+                                badge = 'bg-emerald-500 text-dexBg border-emerald-400';
+                            } else if (oIdx === chosen) {
+                                style = 'bg-red-950/50 border-red-500 text-red-200';
+                                badge = 'bg-red-500 text-white border-red-400';
+                            } else {
+                                style = 'bg-dexCard/50 border-dexBorder/50 text-slate-500';
+                            }
+                        }
+
+                        return `
+                            <button type="button" onclick="answerPracticalCase(${oIdx})" class="w-full text-left p-3.5 rounded-xl border text-xs sm:text-sm font-medium flex items-start gap-3 transition cursor-pointer ${style}">
+                                <span class="w-6 h-6 rounded-lg border flex items-center justify-center font-mono font-extrabold text-xs shrink-0 ${badge}">
+                                    ${['A', 'B', 'C'][oIdx]}
+                                </span>
+                                <span class="leading-snug pt-0.5">${opt}</span>
+                            </button>
+                        `;
+                    }).join('')}
+                </div>
+
+                ${isAnswered ? `
+                    <div class="p-4 rounded-xl border ${chosen === activeCase.correct ? 'bg-emerald-950/30 border-emerald-500/40' : 'bg-amber-950/30 border-amber-500/40'} space-y-2">
+                        <div class="text-xs font-extrabold uppercase tracking-wider ${chosen === activeCase.correct ? 'text-emerald-400' : 'text-amber-400'}">
+                            ${chosen === activeCase.correct ? '✓ Diagnostic Correct — Validation Technique' : '⚠ Correction & Explication Automaticien CVC'}
+                        </div>
+                        <p class="text-xs sm:text-sm text-slate-200 leading-relaxed">${activeCase.explanation}</p>
+                        <div class="pt-2 flex justify-end">
+                            <button type="button" onclick="selectPracticalCase(${(simState.currentCaseIdx + 1) % PID_PRACTICAL_CASES.length})" class="px-4 py-2 rounded-xl bg-dexCyan text-dexBg text-xs font-extrabold cursor-pointer">
+                                Cas suivant →
+                            </button>
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // =====================================================================
+        // 9. NAVIGATION ONGLETS, MÉMO & EXPORT RAPPORT (TXT + PDF)
+        // =====================================================================
+        function switchView(tab) {
+            simState.activeTab = tab;
+            const isBench = tab === 'bench';
+            document.getElementById('view-bench').classList.toggle('hidden', !isBench);
+            document.getElementById('view-cases').classList.toggle('hidden', isBench);
+
+            document.getElementById('tab-bench').className = isBench
+                ? 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-dexCyan text-dexBg shadow-md shrink-0 transition cursor-pointer'
+                : 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-300 hover:bg-dexSurface shrink-0 transition cursor-pointer';
+
+            document.getElementById('tab-cases').className = !isBench
+                ? 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-dexCyan text-dexBg shadow-md shrink-0 transition flex items-center gap-2 cursor-pointer'
+                : 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-slate-300 hover:bg-dexSurface shrink-0 transition flex items-center gap-2 cursor-pointer';
+
+            if (isBench) setTimeout(drawTrendCanvas, 40);
+        }
+
+        function toggleMemoDrawer() {
+            document.getElementById('memo-drawer').classList.toggle('hidden');
+        }
+
+        function getSessionSummaryData() {
+            const cfg = HVAC_LOOPS[simState.loopKey];
+            let quizScore = 0;
+            PID_PRACTICAL_CASES.forEach((c, i) => {
+                if (simState.caseAnswers[i] === c.correct) quizScore++;
+            });
+            return {
+                cfg,
+                quizScore,
+                xp: (100 / simState.kp).toFixed(1),
+                ki: (simState.kp / simState.ti).toFixed(3),
+                kd: (simState.kp * simState.td).toFixed(1),
+                err: Math.abs(simState.setpoint - simState.measuredX).toFixed(cfg.decimals)
+            };
+        }
+
+        function exportTextReport() {
+            const data = getSessionSummaryData();
+            const now = new Date().toLocaleString('fr-FR');
+            const content = [
+                "====================================================================",
+                "DEXFORMA — RAPPORT DE RÉGLAGE PID & MISE EN SERVICE CVC",
+                `Date d'édition : ${now}`,
+                "====================================================================",
+                "",
+                `1. BOUCLE RÉGULÉE : ${data.cfg.name}`,
+                `   - Consigne active (W) : ${simState.setpoint.toFixed(data.cfg.decimals)} ${data.cfg.unit}`,
+                `   - Mesure actuelle (X) : ${simState.measuredX.toFixed(data.cfg.decimals)} ${data.cfg.unit}`,
+                `   - Sortie commande (Y) : ${simState.outputY.toFixed(1)} %`,
+                "",
+                "2. PARAMÈTRES DU RÉGULATEUR PID :",
+                `   - Structure : Mode ${simState.ctrlMode}`,
+                `   - Gain Proportionnel Kp : ${simState.kp} (Bande Proportionnelle XP = ${data.xp} %)`,
+                `   - Temps d'Intégrale Ti  : ${simState.ti} s (Ki = ${data.ki} s^-1)`,
+                `   - Temps de Dérivée Td   : ${simState.td} s (Kd = ${data.kd} s)`,
+                "",
+                "3. DIAGNOSTIC & PERFORMANCES TRANSITOIRES :",
+                `   - Diagnostic temps réel : ${simState.diagnosticLabel}`,
+                `   - Erreur statique |W-X| : ${data.err} ${data.cfg.unit}`,
+                `   - Dépassement max       : ${simState.maxOvershootPct.toFixed(1)} %`,
+                `   - Temps de réponse      : ${simState.settlingTimeSec !== null ? simState.settlingTimeSec + ' s' : 'En cours'}`,
+                "",
+                "4. ÉVALUATION CAS PRATIQUES TERRAIN :",
+                `   - Score obtenu : ${data.quizScore} / 10 scénarios validés`,
+                "===================================================================="
+            ].join("\n");
+
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Rapport_PID_CVC_Dexforma_${Date.now()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast("Rapport texte (.TXT) téléchargé !");
+        }
+
+        function printPdfReport() {
+            const data = getSessionSummaryData();
+            const now = new Date();
+            document.getElementById('print-timestamp').textContent = `Édité le ${now.toLocaleDateString('fr-FR')} à ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+
+            document.getElementById('print-content-body').innerHTML = `
+                <div class="p-4 rounded-xl border border-slate-300 bg-slate-50 space-y-2">
+                    <div class="text-xs font-bold uppercase text-slate-500">Boucle CVC Testée</div>
+                    <div class="text-lg font-extrabold text-slate-900">${data.cfg.name}</div>
+                    <div class="grid grid-cols-3 gap-4 pt-2 font-mono text-xs">
+                        <div>Consigne W : <strong>${simState.setpoint.toFixed(data.cfg.decimals)} ${data.cfg.unit}</strong></div>
+                        <div>Mesure X : <strong>${simState.measuredX.toFixed(data.cfg.decimals)} ${data.cfg.unit}</strong></div>
+                        <div>Commande Y : <strong>${simState.outputY.toFixed(1)} %</strong></div>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-base font-extrabold border-b border-slate-300 pb-1 mb-2">1. Paramètres du Régulateur PID (Mode ${simState.ctrlMode})</h2>
+                    <table class="w-full text-left border-collapse text-xs font-mono">
+                        <tr class="border-b border-slate-300 bg-slate-100">
+                            <th class="p-2">Paramètre</th>
+                            <th class="p-2">Valeur Réglée</th>
+                            <th class="p-2">Équivalence CVC</th>
+                        </tr>
+                        <tr class="border-b border-slate-200">
+                            <td class="p-2 font-bold">Action Proportionnelle (Kp)</td>
+                            <td class="p-2">${simState.kp}</td>
+                            <td class="p-2">Bande Proportionnelle XP = ${data.xp} %</td>
+                        </tr>
+                        <tr class="border-b border-slate-200">
+                            <td class="p-2 font-bold">Action Intégrale (Ti)</td>
+                            <td class="p-2">${simState.ti} s</td>
+                            <td class="p-2">Gain intégral Ki = ${data.ki} s⁻¹</td>
+                        </tr>
+                        <tr class="border-b border-slate-200">
+                            <td class="p-2 font-bold">Action Dérivée (Td)</td>
+                            <td class="p-2">${simState.td} s</td>
+                            <td class="p-2">Gain dérivé Kd = ${data.kd} s</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="p-4 rounded-xl border border-slate-300">
+                        <h3 class="font-bold text-slate-900 mb-1">2. Diagnostic &amp; Stabilité</h3>
+                        <ul class="text-xs space-y-1 font-mono">
+                            <li>État boucle : <strong>${simState.diagnosticLabel}</strong></li>
+                            <li>Erreur statique : <strong>${data.err} ${data.cfg.unit}</strong></li>
+                            <li>Dépassement max : <strong>${simState.maxOvershootPct.toFixed(1)} %</strong></li>
+                        </ul>
+                    </div>
+                    <div class="p-4 rounded-xl border border-slate-300">
+                        <h3 class="font-bold text-slate-900 mb-1">3. Validation Cas Pratiques Terrain</h3>
+                        <p class="text-xs">Score obtenu au module de diagnostic PID : <strong class="font-mono text-base">${data.quizScore} / 10</strong></p>
+                    </div>
+                </div>
+            `;
+
+            showToast("Préparation de l'export PDF...");
+            setTimeout(() => window.print(), 250);
+        }
+
+        // =====================================================================
+        // 10. UTILITAIRE TOAST & BOUCLE D'ANIMATION PRINCIPALE
+        // =====================================================================
+        function showToast(msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let style = 'border-dexCyan/50 bg-dexCard text-white';
+            let dot = 'bg-dexCyan';
+            if (type === 'success') { style = 'border-emerald-500/50 bg-dexCard text-emerald-300'; dot = 'bg-emerald-400'; }
+            else if (type === 'warn') { style = 'border-amber-500/50 bg-dexCard text-amber-300'; dot = 'bg-amber-400'; }
+            else if (type === 'error') { style = 'border-red-500/60 bg-dexCard text-red-300'; dot = 'bg-red-500'; }
+
+            toast.className = `pointer-events-auto px-4 py-2.5 rounded-xl border shadow-2xl text-xs font-semibold flex items-center gap-2.5 transition-all duration-300 ${style}`;
+            toast.innerHTML = `<span class="w-2 h-2 rounded-full ${dot}"></span><span>${msg}</span>`;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(8px)';
+                setTimeout(() => toast.remove(), 280);
+            }, 2800);
+        }
+
+        window.addEventListener('resize', () => {
+            if (simState.activeTab === 'bench') drawTrendCanvas();
+        });
+
+        window.onload = function () {
+            setupCanvasHover();
+            renderPracticalCases();
+            selectHvacLoop('cta_soufflage');
+
+            // Boucle temps réel à 10 Hz (pas physique fin de 0.2s)
+            setInterval(() => {
+                if (!simState.paused) {
+                    for (let s = 0; s < simState.speedMult; s++) {
+                        stepPhysicsAndPid(0.2);
+                    }
+                    updateSynopticAndMetrics();
+                    if (simState.activeTab === 'bench') {
+                        drawTrendCanvas();
+                    }
+                }
+            }, 100);
+        };
+    </script>
+</body>
+</html>
